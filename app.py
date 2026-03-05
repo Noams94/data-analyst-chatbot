@@ -1068,8 +1068,8 @@ body {{
 
 /* Skip-to-main-content link (keyboard users) */
 .skip-link {{
-    position: absolute;
-    top: -40px;
+    position: fixed;
+    top: -50px;
     left: 0;
     background: #1a73e8;
     color: white;
@@ -1078,10 +1078,13 @@ body {{
     font-weight: 600;
     z-index: 9999;
     text-decoration: none;
-    transition: top 0.2s;
+    transition: top 0.15s ease;
 }}
-.skip-link:focus {{
+.skip-link:focus,
+.skip-link:focus-visible {{
     top: 0;
+    outline: 3px solid #fff !important;
+    outline-offset: -3px !important;
 }}
 
 /* Visible focus ring on every interactive element */
@@ -1747,7 +1750,12 @@ def main() -> None:
     inject_css(lang)
     # Skip-to-main link for keyboard / screen-reader users
     st.markdown(
-        f'<a class="skip-link" href="#main-content">{T["a11y_skip"]}</a>',
+        f'''<a class="skip-link" href="#main-content"
+               onclick="(function(){{
+                 var t=document.getElementById('main-content');
+                 if(t){{t.focus();t.scrollIntoView({{behavior:'smooth',block:'start'}});}};
+               }})(); return false;"
+            >{T["a11y_skip"]}</a>''',
         unsafe_allow_html=True,
     )
 
@@ -1785,6 +1793,13 @@ def main() -> None:
             st.session_state.chat = build_chat()
         except ValueError:
             pass  # Ollama not configured yet — chat stays None
+
+    # ── Skip-link target anchor ───────────────────────────────────────────
+    st.markdown(
+        '<div id="main-content" tabindex="-1" '
+        'style="outline:none;position:absolute;top:0;left:0;"></div>',
+        unsafe_allow_html=True,
+    )
 
     # ── Tabs ──────────────────────────────────────────────────────────────
     tab_chat, tab_charts, tab_dashboard, tab_data = st.tabs([
