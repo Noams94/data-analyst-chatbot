@@ -23,7 +23,7 @@ st.set_page_config(
     page_title="Data Analyst Bot | צ'אטבוט נתונים",
     page_icon="🤖",
     layout="wide",
-    initial_sidebar_state="expanded",
+    initial_sidebar_state="auto",   # collapsed on mobile, expanded on desktop
 )
 
 # ─── i18n ─────────────────────────────────────────────────────────────────────
@@ -724,8 +724,15 @@ def inject_css(lang: str) -> None:
     text_align = "right" if lang == "he" else "left"
     st.markdown(f"""
 <style>
-/* ── General ── */
-body {{ font-family: "Segoe UI", "Helvetica Neue", Arial, sans-serif; }}
+/* ═══════════════════════════════════════════════
+   BASE STYLES  (mobile-first)
+═══════════════════════════════════════════════ */
+*, *::before, *::after {{ box-sizing: border-box; }}
+
+body {{
+    font-family: "Segoe UI", "Helvetica Neue", Arial, sans-serif;
+    -webkit-text-size-adjust: 100%;   /* prevent iOS font inflation */
+}}
 
 /* ── RTL / LTR ── */
 .stChatMessage p, .stChatMessage li {{
@@ -735,19 +742,20 @@ body {{ font-family: "Segoe UI", "Helvetica Neue", Arial, sans-serif; }}
 
 /* ── Header ── */
 .app-header {{
-    padding: 1rem 0 0.5rem;
+    padding: 0.75rem 0 0.5rem;
     border-bottom: 2px solid #f0f0f0;
-    margin-bottom: 1rem;
+    margin-bottom: 0.75rem;
 }}
 .app-title {{
-    font-size: 2rem;
+    font-size: 1.5rem;        /* mobile default */
     font-weight: 700;
     color: #1a1a2e;
     direction: {direction};
+    line-height: 1.2;
 }}
 .app-sub {{
     color: #666;
-    font-size: 0.95rem;
+    font-size: 0.85rem;
     direction: {direction};
 }}
 
@@ -772,11 +780,13 @@ body {{ font-family: "Segoe UI", "Helvetica Neue", Arial, sans-serif; }}
 /* ── Metric cards ── */
 .metric-row {{
     display: flex;
+    flex-wrap: wrap;
     gap: 0.5rem;
     margin-top: 0.4rem;
 }}
 .metric-card {{
     flex: 1;
+    min-width: 70px;
     background: white;
     border-radius: 8px;
     padding: 0.5rem 0.7rem;
@@ -793,29 +803,60 @@ body {{ font-family: "Segoe UI", "Helvetica Neue", Arial, sans-serif; }}
     color: #888;
 }}
 
-/* ── Quick question buttons ── */
-.stButton > button {{
+/* ── All buttons — touch-friendly min size ── */
+.stButton > button,
+.stDownloadButton > button {{
+    min-height: 44px;           /* Apple/Google touch target guideline */
     width: 100%;
     text-align: {text_align};
     direction: {direction};
-    padding: 0.4rem 0.7rem;
+    padding: 0.5rem 0.8rem;
     border-radius: 8px;
-    font-size: 0.85rem;
+    font-size: 0.88rem;
     border: 1px solid #dde1f0;
     background: white;
     color: #333;
-    transition: all 0.15s;
+    transition: background 0.15s, color 0.15s, border-color 0.15s;
+    cursor: pointer;
+    -webkit-tap-highlight-color: transparent;
 }}
-.stButton > button:hover {{
+.stButton > button:hover,
+.stButton > button:focus-visible {{
     background: #1a73e8;
     color: white;
     border-color: #1a73e8;
+    outline: none;
+}}
+
+/* ── Download buttons — distinct accent ── */
+.stDownloadButton > button {{
+    background: #f0f4ff;
+    color: #1a73e8;
+    border-color: #c5d6fa;
+    font-weight: 600;
+}}
+.stDownloadButton > button:hover,
+.stDownloadButton > button:focus-visible {{
+    background: #1a73e8;
+    color: white;
+    border-color: #1a73e8;
+    outline: none;
+}}
+.stDownloadButton > button[disabled] {{
+    opacity: 0.45;
+    pointer-events: none;
 }}
 
 /* ── Chat area ── */
 .stChatMessage {{
     border-radius: 12px;
     margin-bottom: 4px;
+}}
+.stChatInput textarea {{
+    font-size: 1rem;        /* legible on mobile */
+    min-height: 48px;
+    direction: {direction};
+    text-align: {text_align};
 }}
 
 /* ── Tool badge ── */
@@ -836,13 +877,14 @@ body {{ font-family: "Segoe UI", "Helvetica Neue", Arial, sans-serif; }}
     overflow: hidden;
     border: 1px solid #e8eaf0;
     margin-top: 0.5rem;
+    max-width: 100%;
 }}
 
 /* ── Welcome card ── */
 .welcome-card {{
     background: linear-gradient(135deg, #667eea20, #764ba220);
     border-radius: 12px;
-    padding: 1.2rem 1.5rem;
+    padding: 1rem 1.2rem;
     border: 1px solid #dde1f0;
     direction: {direction};
 }}
@@ -856,7 +898,7 @@ body {{ font-family: "Segoe UI", "Helvetica Neue", Arial, sans-serif; }}
     color: #1e7e34;
     border: 1px solid #b7dfbe;
     border-radius: 20px;
-    padding: 4px 12px;
+    padding: 6px 12px;
     font-size: 0.8rem;
     font-weight: 600;
     width: 100%;
@@ -871,7 +913,7 @@ body {{ font-family: "Segoe UI", "Helvetica Neue", Arial, sans-serif; }}
     color: #c5221f;
     border: 1px solid #f5c2c0;
     border-radius: 20px;
-    padding: 4px 12px;
+    padding: 6px 12px;
     font-size: 0.8rem;
     font-weight: 600;
     width: 100%;
@@ -883,6 +925,76 @@ body {{ font-family: "Segoe UI", "Helvetica Neue", Arial, sans-serif; }}
     color: #888;
     text-align: center;
     margin-top: 4px;
+}}
+
+/* ═══════════════════════════════════════════════
+   TABLET  ≥ 768 px
+═══════════════════════════════════════════════ */
+@media (min-width: 768px) {{
+    .app-title {{
+        font-size: 1.8rem;
+    }}
+    .app-sub {{
+        font-size: 0.9rem;
+    }}
+    .stButton > button,
+    .stDownloadButton > button {{
+        font-size: 0.9rem;
+        padding: 0.5rem 0.9rem;
+    }}
+}}
+
+/* ═══════════════════════════════════════════════
+   DESKTOP  ≥ 1024 px
+═══════════════════════════════════════════════ */
+@media (min-width: 1024px) {{
+    .app-title {{
+        font-size: 2rem;
+    }}
+    .app-sub {{
+        font-size: 0.95rem;
+    }}
+    .stButton > button,
+    .stDownloadButton > button {{
+        font-size: 0.92rem;
+    }}
+    .welcome-card {{
+        padding: 1.2rem 1.5rem;
+    }}
+}}
+
+/* ═══════════════════════════════════════════════
+   SMALL MOBILE  < 480 px
+═══════════════════════════════════════════════ */
+@media (max-width: 480px) {{
+    .app-title {{
+        font-size: 1.3rem;
+    }}
+    .metric-row {{
+        flex-direction: column;
+    }}
+    .metric-card {{
+        min-width: unset;
+    }}
+    .stButton > button,
+    .stDownloadButton > button {{
+        min-height: 48px;       /* extra large on phones */
+        font-size: 0.95rem;
+    }}
+    /* Reduce horizontal whitespace */
+    .block-container {{
+        padding-left: 0.75rem !important;
+        padding-right: 0.75rem !important;
+    }}
+}}
+
+/* ═══════════════════════════════════════════════
+   HIGH-DPI / RETINA (image sharpness)
+═══════════════════════════════════════════════ */
+@media (-webkit-min-device-pixel-ratio: 2), (min-resolution: 192dpi) {{
+    .chart-wrap img {{
+        image-rendering: -webkit-optimize-contrast;
+    }}
 }}
 </style>
 """, unsafe_allow_html=True)
