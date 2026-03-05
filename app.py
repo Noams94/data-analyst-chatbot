@@ -188,6 +188,15 @@ TEXT = {
         "email_hint":            "Gmail: הגדר App Password ב-myaccount.google.com/apppasswords",
         "email_no_data":         "⚠️ אין נתונים לשליחה",
         "email_no_chat":         "⚠️ אין שיחה לשליחה",
+        # קוד + dashboard מה-chat
+        "show_code":             "🔎 קוד",
+        "add_to_dash_from_chat": "📌 הוסף לדשבורד",
+        "chart_added_from_chat": "✅ גרף נוסף לדשבורד!",
+        # דוח
+        "export_report":         "📊 ייצא דוח (HTML)",
+        "export_report_help":    "דוח מסודר של השיחה עם כל הממצאים והגרפים",
+        # כפתורי export בתחתית הצ'אט
+        "exports_lbl":           "⬇️ ייצוא שיחה",
     },
     "en": {
         "page_title":       "🤖 Data Analyst Chatbot",
@@ -332,6 +341,15 @@ TEXT = {
         "email_hint":            "Gmail: create an App Password at myaccount.google.com/apppasswords",
         "email_no_data":         "⚠️ No data to send",
         "email_no_chat":         "⚠️ No conversation to send",
+        # code + dashboard from chat
+        "show_code":             "🔎 Code",
+        "add_to_dash_from_chat": "📌 Add to Dashboard",
+        "chart_added_from_chat": "✅ Chart added to Dashboard!",
+        # report
+        "export_report":         "📊 Export Report (HTML)",
+        "export_report_help":    "Structured report of the conversation with all findings and charts",
+        # export buttons label
+        "exports_lbl":           "⬇️ Export conversation",
     },
 }
 
@@ -750,6 +768,95 @@ def export_chat_pdf(messages: list, title: str = "Chat Export") -> bytes:
         pdf.ln(3)
 
     return bytes(pdf.output())
+
+
+def export_report_html(messages: list, title: str = "Analysis Report") -> bytes:
+    """
+    Generate a structured HTML report from the conversation.
+    Includes: title, date, conversation (user questions + AI answers),
+    embedded chart images, and code snippets.
+    """
+    import base64, datetime as _dt
+
+    now = _dt.datetime.now().strftime("%Y-%m-%d %H:%M")
+    user_turns  = [m for m in messages if m["role"] == "user"]
+    asst_turns  = [m for m in messages if m["role"] == "assistant"]
+    n_charts    = sum(len(m.get("charts", [])) for m in asst_turns)
+    n_code      = sum(len(m.get("code_snippets", [])) for m in asst_turns)
+
+    def _img_tag(path: str) -> str:
+        p = Path(path)
+        if not p.exists():
+            return ""
+        data = base64.b64encode(p.read_bytes()).decode()
+        return (f'<img src="data:image/png;base64,{data}" '
+                f'style="max-width:100%;border-radius:8px;margin:8px 0;">')
+
+    def _escape(s: str) -> str:
+        return (s.replace("&", "&amp;").replace("<", "&lt;")
+                 .replace(">", "&gt;").replace("\n", "<br>"))
+
+    rows_html = []
+    pairs = list(zip(user_turns, asst_turns))
+    if len(user_turns) > len(asst_turns):
+        pairs.append((user_turns[-1], None))
+
+    for i, (u, a) in enumerate(pairs, 1):
+        charts_html = ""
+        code_html   = ""
+        if a:
+            for cp in a.get("charts", []):
+                charts_html += _img_tag(cp)
+            for snippet in a.get("code_snippets", []):
+                charts_html += (
+                    f'<details style="margin:8px 0;">'
+                    f'<summary style="cursor:pointer;color:#555;font-size:.85em;">🔎 קוד</summary>'
+                    f'<pre style="background:#f4f4f4;padding:10px;border-radius:6px;'
+                    f'font-size:.82em;overflow-x:auto;">{_escape(snippet)}</pre>'
+                    f'</details>'
+                )
+        rows_html.append(f"""
+        <div style="margin-bottom:28px;border-bottom:1px solid #e0e0e0;padding-bottom:20px;">
+          <div style="margin-bottom:8px;">
+            <span style="background:#1a73e8;color:white;padding:2px 10px;border-radius:12px;
+                         font-size:.8em;font-weight:600;">שאלה {i}</span>
+            <span style="font-size:.85em;color:#888;margin-right:8px;">{u['content'][:120]}</span>
+          </div>
+          <div style="background:#f8f9fa;border-radius:8px;padding:14px 18px;margin-bottom:6px;
+                      line-height:1.7;color:#222;">{_escape(a['content'] if a else '')}</div>
+          {charts_html}
+        </div>""")
+
+    html = f"""<!DOCTYPE html>
+<html lang="he" dir="rtl">
+<head>
+  <meta charset="utf-8">
+  <title>{title}</title>
+  <style>
+    body{{font-family:'Segoe UI',Arial,sans-serif;max-width:860px;margin:40px auto;
+         padding:0 20px;color:#222;background:#fff;direction:rtl;}}
+    h1{{color:#1a73e8;border-bottom:3px solid #1a73e8;padding-bottom:10px;}}
+    .meta{{color:#888;font-size:.9em;margin-bottom:32px;}}
+    .stat{{display:inline-block;background:#e8f0fe;color:#1a73e8;padding:4px 14px;
+           border-radius:20px;font-size:.85em;font-weight:600;margin-left:8px;}}
+  </style>
+</head>
+<body>
+  <h1>📊 {title}</h1>
+  <div class="meta">
+    נוצר: {now}
+    &nbsp;·&nbsp;
+    <span class="stat">💬 {len(user_turns)} שאלות</span>
+    <span class="stat">📈 {n_charts} גרפים</span>
+    <span class="stat">🔎 {n_code} קטעי קוד</span>
+  </div>
+  {''.join(rows_html)}
+  <p style="color:#aaa;font-size:.8em;text-align:center;margin-top:40px;">
+    נוצר על ידי Data Analyst Chatbot · {now}
+  </p>
+</body>
+</html>"""
+    return html.encode("utf-8")
 
 
 def send_email_smtp(
@@ -1732,14 +1839,41 @@ def render_sidebar(T: dict) -> None:
 
 # ─── Chat History ─────────────────────────────────────────────────────────────
 def render_history() -> None:
-    for msg in st.session_state.messages:
+    T = TEXT[st.session_state.lang]
+    for msg_idx, msg in enumerate(st.session_state.messages):
         with st.chat_message(msg["role"]):
             st.markdown(msg["content"])
-            # Replay charts saved in this message
-            for chart_path in msg.get("charts", []):
+
+            # ── Charts (with Add-to-Dashboard button) ────────────────────
+            chart_configs = msg.get("chart_configs", [])
+            for ci, chart_path in enumerate(msg.get("charts", [])):
                 p = Path(chart_path)
                 if p.exists():
                     st.image(str(p), use_container_width=True)
+                    # "Add to Dashboard" button for each chart
+                    btn_key = f"add_dash_{msg_idx}_{ci}"
+                    if st.button(
+                        T["add_to_dash_from_chat"],
+                        key=btn_key,
+                        help=T.get("add_to_dash", ""),
+                    ):
+                        cfg = (chart_configs[ci]
+                               if ci < len(chart_configs) else None)
+                        if cfg:
+                            st.session_state.dashboard_charts.append(cfg)
+                        else:
+                            # Fallback: static image entry
+                            st.session_state.dashboard_charts.append({
+                                "type": "image",
+                                "path": str(p),
+                                "title": Path(p).stem,
+                            })
+                        st.toast(T["chart_added_from_chat"])
+
+            # ── Code snippets (collapsible, with built-in copy button) ───
+            for si, snippet in enumerate(msg.get("code_snippets", [])):
+                with st.expander(T["show_code"], expanded=False):
+                    st.code(snippet, language="python")
 
 
 # ─── Main ──────────────────────────────────────────────────────────────────────
@@ -1820,41 +1954,54 @@ def main() -> None:
             if st.session_state.data_loaded:
                 st.info(T["onboarding_hint"])
         else:
-            # ── Export row ────────────────────────────────────────────────
-            _has_charts = any(msg.get("charts") for msg in st.session_state.messages)
-            _ec1, _ec2, _ec3, _ = st.columns([1, 1, 1, 3])
-            with _ec1:
-                st.download_button(
-                    T["export_chat"],
-                    data=export_chat_html(st.session_state.messages, T["page_title"]),
-                    file_name="chat_export.html",
-                    mime="text/html",
-                    help=T["export_chat_help"],
-                    use_container_width=True,
-                    key="export_chat_btn",
-                )
-            with _ec2:
-                st.download_button(
-                    T["export_pdf"],
-                    data=export_chat_pdf(st.session_state.messages, T["page_title"]),
-                    file_name="chat_export.pdf",
-                    mime="application/pdf",
-                    help=T["export_pdf_help"],
-                    use_container_width=True,
-                    key="export_pdf_btn",
-                )
-            with _ec3:
-                st.download_button(
-                    T["export_ai_charts"],
-                    data=export_ai_charts_zip(st.session_state.messages),
-                    file_name="ai_charts.zip",
-                    mime="application/zip",
-                    help=T["export_ai_charts_help"],
-                    use_container_width=True,
-                    disabled=not _has_charts,
-                    key="export_charts_btn",
-                )
+            # ── Chat history (top of tab, scrolls naturally) ──────────────
             render_history()
+
+            # ── Export expander (below history, out of the way) ───────────
+            _has_charts = any(msg.get("charts") for msg in st.session_state.messages)
+            with st.expander(T["exports_lbl"], expanded=False):
+                _ec1, _ec2, _ec3, _ec4 = st.columns(4)
+                with _ec1:
+                    st.download_button(
+                        T["export_chat"],
+                        data=export_chat_html(st.session_state.messages, T["page_title"]),
+                        file_name="chat_export.html",
+                        mime="text/html",
+                        help=T["export_chat_help"],
+                        use_container_width=True,
+                        key="export_chat_btn",
+                    )
+                with _ec2:
+                    st.download_button(
+                        T["export_pdf"],
+                        data=export_chat_pdf(st.session_state.messages, T["page_title"]),
+                        file_name="chat_export.pdf",
+                        mime="application/pdf",
+                        help=T["export_pdf_help"],
+                        use_container_width=True,
+                        key="export_pdf_btn",
+                    )
+                with _ec3:
+                    st.download_button(
+                        T["export_report"],
+                        data=export_report_html(st.session_state.messages, T["page_title"]),
+                        file_name="analysis_report.html",
+                        mime="text/html",
+                        help=T["export_report_help"],
+                        use_container_width=True,
+                        key="export_report_btn",
+                    )
+                with _ec4:
+                    st.download_button(
+                        T["export_ai_charts"],
+                        data=export_ai_charts_zip(st.session_state.messages),
+                        file_name="ai_charts.zip",
+                        mime="application/zip",
+                        help=T["export_ai_charts_help"],
+                        use_container_width=True,
+                        disabled=not _has_charts,
+                        key="export_charts_btn",
+                    )
 
         # Resolve quick-question button presses
         pre_fill = st.session_state.pop("pending_input", None)
@@ -1915,7 +2062,9 @@ def main() -> None:
                     st.error(_friendly_error(err))
                     _audit("CHAT_ERROR", str(err))
                 _elapsed = (datetime.datetime.now() - _t0).total_seconds()
-                chart_paths = tools.get_pending_charts()
+                chart_paths   = tools.get_pending_charts()
+                chart_configs = tools.get_pending_chart_configs()
+                code_snippets = tools.get_pending_code_snippets()
                 for chart_path in chart_paths:
                     if chart_path.exists():
                         st.image(str(chart_path), use_container_width=True)
@@ -1926,10 +2075,18 @@ def main() -> None:
                 f"charts={len(chart_paths)} elapsed={_elapsed:.1f}s",
             )
             st.session_state.messages.append({
-                "role": "assistant",
-                "content": full_text or "",
-                "charts": [str(p) for p in chart_paths],
+                "role":          "assistant",
+                "content":       full_text or "",
+                "charts":        [str(p) for p in chart_paths],
+                "chart_configs": chart_configs,
+                "code_snippets": code_snippets,
             })
+            # Scroll to bottom so the new response is visible
+            st.markdown(
+                "<script>window.parent.document.querySelector("
+                "'[data-testid=\"stMain\"]').scrollTo(0,9999999);</script>",
+                unsafe_allow_html=True,
+            )
 
         elif final_input and not st.session_state.chat:
             st.warning(T["no_data_warn"])
@@ -2064,12 +2221,26 @@ def main() -> None:
                         with cols[j]:
                             lbl = c.get("title") or f"{c.get('type','גרף')} – {c.get('x','')}"
                             st.markdown(f"**{lbl}**")
-                            try:
-                                fig = build_chart(c, df_now, sample_size=c.get("sample_size", 500))
-                                st.plotly_chart(fig, use_container_width=True,
-                                                key=f"dash_{idx}")
-                            except Exception as e:
-                                st.error(f"שגיאה: {e}")
+                            # ── Static image (from AI chat) ──────────────
+                            if c.get("type") == "image":
+                                img_p = Path(c.get("path", ""))
+                                if img_p.exists():
+                                    st.image(str(img_p), use_container_width=True)
+                                else:
+                                    st.warning("תמונה לא נמצאה")
+                            # ── Plotly chart (from chart builder) ────────
+                            else:
+                                try:
+                                    fig = build_chart(
+                                        c, df_now,
+                                        sample_size=c.get("sample_size", 500),
+                                    )
+                                    st.plotly_chart(
+                                        fig, use_container_width=True,
+                                        key=f"dash_{idx}",
+                                    )
+                                except Exception as e:
+                                    st.error(f"שגיאה: {e}")
                             if st.button(T["dash_remove"], key=f"rm_dash_{idx}",
                                          use_container_width=True):
                                 st.session_state.dashboard_charts.pop(idx)

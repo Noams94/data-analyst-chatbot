@@ -20,7 +20,9 @@ import pandas as pd
 
 _df: Optional[pd.DataFrame] = None
 _data_name: str = ""
-_pending_charts: list[Path] = []      # Charts waiting to be shown in the UI
+_pending_charts: list[Path] = []        # Charts waiting to be shown in the UI
+_pending_chart_configs: list[dict] = [] # Config dicts (type, x, y, …) per chart
+_pending_code_snippets: list[str] = []  # Code run via run_analysis / create_chart
 _charts_dir = Path(__file__).parent / "charts"
 _charts_dir.mkdir(exist_ok=True)
 
@@ -121,6 +123,20 @@ def get_pending_charts() -> list[Path]:
     return charts
 
 
+def get_pending_chart_configs() -> list[dict]:
+    """Return chart configs created since the last call, then clear the queue."""
+    configs = list(_pending_chart_configs)
+    _pending_chart_configs.clear()
+    return configs
+
+
+def get_pending_code_snippets() -> list[str]:
+    """Return code snippets run since the last call, then clear the queue."""
+    snippets = list(_pending_code_snippets)
+    _pending_code_snippets.clear()
+    return snippets
+
+
 # ─── Registered Tools ─────────────────────────────────────────────────────────
 
 def get_data_overview() -> str:
@@ -186,6 +202,7 @@ def run_analysis(pandas_code: str) -> str:
     if _df is None:
         return "⚠️ No dataset loaded."
 
+    _pending_code_snippets.append(pandas_code.strip())
     local_ns = {"df": _df.copy(), "pd": pd, "np": np, "json": json}
     try:
         lines = [l for l in pandas_code.strip().splitlines() if l.strip()]
@@ -372,6 +389,26 @@ def create_chart(
         fig.savefig(path, bbox_inches="tight", facecolor="white")
         plt.close(fig)
         _pending_charts.append(path)
+
+        # Track config (for "Add to Dashboard") and code (for code viewer)
+        _pending_chart_configs.append({
+            "type": "image",
+            "path": str(path),
+            "title": title or f"{t} – {x_column}",
+        })
+        _code = (
+            f"create_chart(\n"
+            f"    chart_type={chart_type!r},\n"
+            f"    x_column={x_column!r},\n"
+            + (f"    y_column={y_column!r},\n" if y_column else "")
+            + (f"    title={title!r},\n" if title else "")
+            + (f"    color_column={color_column!r},\n" if color_column else "")
+            + (f"    aggregation={aggregation!r},\n" if aggregation != "sum" else "")
+            + (f"    top_n={top_n},\n" if top_n else "")
+            + ")"
+        )
+        _pending_code_snippets.append(_code)
+
         return f"✅ Chart created: '{title or t}' — displayed below."
 
     except Exception:
