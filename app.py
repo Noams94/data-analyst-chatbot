@@ -109,6 +109,16 @@ TEXT = {
         "data_autofix_btn":   "🔧 תקן אוטומטית",
         "data_fixed":         "✅ הנתונים תוקנו אוטומטית",
         "data_warnings_hdr":  "אזהרות איכות נתונים",
+        # ספק AI
+        "provider_header":    "🤖 ספק AI",
+        "provider_cloud":     "☁️ Anthropic Claude",
+        "provider_local":     "🦙 Ollama (מקומי)",
+        "ollama_model_lbl":   "מודל Ollama",
+        "ollama_status_ok":   "✅ Ollama פעיל",
+        "ollama_status_err":  "❌ Ollama לא נמצא",
+        "ollama_hint":        "הורד והפעל Ollama: ollama.com",
+        "ollama_no_models":   "לא נמצאו מודלים. הפעל: ollama pull llama3.2",
+        "ollama_refresh":     "🔄 רענן",
     },
     "en": {
         "page_title":       "🤖 Data Analyst Chatbot",
@@ -190,6 +200,16 @@ TEXT = {
         "data_autofix_btn":   "🔧 Auto-fix",
         "data_fixed":         "✅ Data auto-fixed",
         "data_warnings_hdr":  "data quality warnings",
+        # AI Provider
+        "provider_header":    "🤖 AI Provider",
+        "provider_cloud":     "☁️ Anthropic Claude",
+        "provider_local":     "🦙 Ollama (local)",
+        "ollama_model_lbl":   "Ollama Model",
+        "ollama_status_ok":   "✅ Ollama running",
+        "ollama_status_err":  "❌ Ollama not found",
+        "ollama_hint":        "Download & run Ollama: ollama.com",
+        "ollama_no_models":   "No models found. Run: ollama pull llama3.2",
+        "ollama_refresh":     "🔄 Refresh",
     },
 }
 
@@ -222,6 +242,25 @@ Respond in the same language the user writes in (Hebrew or English).
 - Round numbers to 2 decimal places
 - When writing Hebrew, keep markdown formatting clean
 """.strip()
+
+# ─── Ollama Helper ────────────────────────────────────────────────────────────
+
+def get_ollama_models() -> tuple:
+    """Query local Ollama for available models. Returns (available: bool, model_names: list)."""
+    try:
+        import urllib.request as _req
+        import json as _json
+        req = _req.Request(
+            "http://localhost:11434/api/tags",
+            headers={"Accept": "application/json"},
+        )
+        with _req.urlopen(req, timeout=2) as resp:
+            data = _json.loads(resp.read())
+        models = [m["name"] for m in data.get("models", [])]
+        return True, models
+    except Exception:
+        return False, []
+
 
 # ─── Data Validation ──────────────────────────────────────────────────────────
 
@@ -587,6 +626,17 @@ def init_state() -> None:
         st.session_state.api_key = os.environ.get("ANTHROPIC_API_KEY", "")
     if "api_key_from_env" not in st.session_state:
         st.session_state.api_key_from_env = bool(os.environ.get("ANTHROPIC_API_KEY", ""))
+    # Provider: "anthropic" | "ollama"
+    if "provider" not in st.session_state:
+        st.session_state.provider = "anthropic"
+    if "ollama_model" not in st.session_state:
+        st.session_state.ollama_model = ""
+    if "ollama_available" not in st.session_state:
+        st.session_state.ollama_available = False
+    if "ollama_models" not in st.session_state:
+        st.session_state.ollama_models = []
+    if "ollama_queried" not in st.session_state:
+        st.session_state.ollama_queried = False
 
 
 def get_active_key() -> str:
@@ -594,14 +644,22 @@ def get_active_key() -> str:
     return st.session_state.api_key
 
 
-def build_chat() -> ChatAnthropic:
-    key = get_active_key()
-    chat = ChatAnthropic(
-        model="claude-opus-4-6",
-        system_prompt=SYSTEM_PROMPT,
-        max_tokens=8192,
-        api_key=key if key else None,   # None → chatlas falls back to env var
-    )
+def build_chat():
+    """Build a chat object based on the current provider (Anthropic or Ollama)."""
+    if st.session_state.get("provider", "anthropic") == "ollama":
+        from chatlas import ChatOllama
+        chat = ChatOllama(
+            model=st.session_state.ollama_model or "llama3.2",
+            system_prompt=SYSTEM_PROMPT,
+        )
+    else:
+        key = get_active_key()
+        chat = ChatAnthropic(
+            model="claude-opus-4-6",
+            system_prompt=SYSTEM_PROMPT,
+            max_tokens=8192,
+            api_key=key if key else None,
+        )
     chat.register_tool(tools.get_data_overview)
     chat.register_tool(tools.run_analysis)
     chat.register_tool(tools.create_chart)
@@ -660,7 +718,7 @@ def load_uploaded_file(uploaded) -> pd.DataFrame:
 
 
 # ─── Response Streaming Generator ─────────────────────────────────────────────
-def text_stream(chat: ChatAnthropic, prompt: str):
+def text_stream(chat, prompt: str):
     """Yield text chunks from chatlas stream (skip tool call/result objects)."""
     for chunk in chat.stream(prompt):
         if isinstance(chunk, str):
@@ -669,20 +727,14 @@ def text_stream(chat: ChatAnthropic, prompt: str):
         # the tools run as a side-effect and populate tools._pending_charts
 
 
-# ─── API Key Section ──────────────────────────────────────────────────────────
-def render_api_key_section(T: dict) -> None:
-    """Secure API key input — stored only in session_state (in-memory)."""
-    st.markdown(f'<div class="sidebar-label">{T["api_header"]}</div>',
-                unsafe_allow_html=True)
+# ─── Provider Section ─────────────────────────────────────────────────────────
 
+def _render_anthropic_key(T: dict) -> None:
+    """Anthropic API key sub-section (stored in-memory only)."""
     has_key = bool(st.session_state.api_key)
-
     if has_key:
-        # Show status badge
         label = T["api_from_env"] if st.session_state.api_key_from_env else T["api_set"]
         st.markdown(f'<div class="api-badge-ok">{label}</div>', unsafe_allow_html=True)
-
-        # Allow clearing (only if not forced by env var)
         if not st.session_state.api_key_from_env:
             if st.button(T["api_clear"], use_container_width=True, key="api_clear_btn"):
                 st.session_state.api_key = ""
@@ -690,11 +742,8 @@ def render_api_key_section(T: dict) -> None:
                 st.session_state.messages = []
                 st.rerun()
     else:
-        # Show error badge
         st.markdown(f'<div class="api-badge-err">{T["api_missing"]}</div>',
                     unsafe_allow_html=True)
-
-        # Password input — masked, never echoed
         new_key = st.text_input(
             T["api_label"],
             type="password",
@@ -708,17 +757,90 @@ def render_api_key_section(T: dict) -> None:
             if cleaned.startswith("sk-ant-"):
                 st.session_state.api_key = cleaned
                 st.session_state.api_key_from_env = False
-                # Rebuild chat with new key if data is loaded
                 if st.session_state.data_loaded:
                     st.session_state.chat = build_chat()
                 st.rerun()
             else:
                 st.error("המפתח חייב להתחיל ב־ sk-ant-  /  Key must start with sk-ant-")
+        st.markdown(f'<div class="api-hint">🔗 {T["api_hint"]}</div>',
+                    unsafe_allow_html=True)
 
-        st.markdown(
-            f'<div class="api-hint">🔗 {T["api_hint"]}</div>',
-            unsafe_allow_html=True,
+
+def _render_ollama_section(T: dict) -> None:
+    """Ollama local-model sub-section."""
+    # Auto-query once per session
+    if not st.session_state.ollama_queried:
+        available, models = get_ollama_models()
+        st.session_state.ollama_available = available
+        st.session_state.ollama_models = models
+        st.session_state.ollama_queried = True
+        if models and not st.session_state.ollama_model:
+            st.session_state.ollama_model = models[0]
+
+    col_status, col_refresh = st.columns([3, 1])
+    with col_status:
+        if st.session_state.ollama_available:
+            st.markdown(f'<div class="api-badge-ok">{T["ollama_status_ok"]}</div>',
+                        unsafe_allow_html=True)
+        else:
+            st.markdown(f'<div class="api-badge-err">{T["ollama_status_err"]}</div>',
+                        unsafe_allow_html=True)
+    with col_refresh:
+        if st.button(T["ollama_refresh"], key="ollama_refresh_btn", use_container_width=True):
+            available, models = get_ollama_models()
+            st.session_state.ollama_available = available
+            st.session_state.ollama_models = models
+            if models and not st.session_state.ollama_model:
+                st.session_state.ollama_model = models[0]
+            if st.session_state.data_loaded:
+                st.session_state.chat = build_chat()
+            st.rerun()
+
+    if st.session_state.ollama_available and st.session_state.ollama_models:
+        models_list = st.session_state.ollama_models
+        cur = st.session_state.ollama_model
+        idx = models_list.index(cur) if cur in models_list else 0
+        model_choice = st.selectbox(
+            T["ollama_model_lbl"],
+            models_list,
+            index=idx,
+            key="ollama_model_select",
+            label_visibility="collapsed",
         )
+        if model_choice != st.session_state.ollama_model:
+            st.session_state.ollama_model = model_choice
+            st.session_state.chat = build_chat() if st.session_state.data_loaded else None
+    elif st.session_state.ollama_available:
+        st.caption(T["ollama_no_models"])
+    else:
+        st.markdown(f'<div class="api-hint">🔗 {T["ollama_hint"]}</div>',
+                    unsafe_allow_html=True)
+
+
+def render_provider_section(T: dict) -> None:
+    """Provider toggle: Anthropic Cloud ↔ Ollama Local."""
+    st.markdown(f'<div class="sidebar-label">{T["provider_header"]}</div>',
+                unsafe_allow_html=True)
+    cur_provider = st.session_state.get("provider", "anthropic")
+    provider = st.radio(
+        T["provider_header"],
+        options=["anthropic", "ollama"],
+        format_func=lambda x: T["provider_cloud"] if x == "anthropic" else T["provider_local"],
+        index=0 if cur_provider == "anthropic" else 1,
+        horizontal=True,
+        label_visibility="collapsed",
+        key="provider_radio",
+    )
+    if provider != cur_provider:
+        st.session_state.provider = provider
+        st.session_state.chat = None
+        st.rerun()
+
+    st.markdown('<div style="margin-top:0.4rem"></div>', unsafe_allow_html=True)
+    if st.session_state.provider == "ollama":
+        _render_ollama_section(T)
+    else:
+        _render_anthropic_key(T)
 
 
 # ─── Sidebar ──────────────────────────────────────────────────────────────────
@@ -731,8 +853,8 @@ def render_sidebar(T: dict) -> None:
 
         st.markdown("---")
 
-        # ── API Key ────────────────────────────────────────────────────────
-        render_api_key_section(T)
+        # ── AI Provider ────────────────────────────────────────────────────
+        render_provider_section(T)
 
         st.markdown("---")
 
@@ -852,7 +974,11 @@ def main() -> None:
 </div>""", unsafe_allow_html=True)
     with col_badge:
         st.markdown("<br>", unsafe_allow_html=True)
-        st.caption("claude-opus-4-6")
+        if st.session_state.get("provider", "anthropic") == "ollama":
+            _badge = st.session_state.get("ollama_model") or "🦙 ollama"
+        else:
+            _badge = "claude-opus-4-6"
+        st.caption(_badge)
 
     # ── Sidebar ───────────────────────────────────────────────────────────
     render_sidebar(T)
@@ -881,9 +1007,13 @@ def main() -> None:
             render_history()
 
         # Resolve quick-question button presses
-        pre_fill   = st.session_state.pop("pending_input", None)
-        no_key     = not bool(get_active_key())
-        no_data    = tools.get_dataframe() is None
+        pre_fill = st.session_state.pop("pending_input", None)
+        if st.session_state.get("provider", "anthropic") == "ollama":
+            no_key = not (st.session_state.ollama_available
+                          and bool(st.session_state.ollama_model))
+        else:
+            no_key = not bool(get_active_key())
+        no_data  = tools.get_dataframe() is None
         user_input = st.chat_input(
             T["input_placeholder"],
             disabled=(no_key or no_data),
