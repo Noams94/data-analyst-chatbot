@@ -5,12 +5,30 @@ Bilingual (Hebrew / English) interface powered by chatlas + Claude Opus 4.6
 
 import os
 import sys
+import logging
+import datetime
 from pathlib import Path
 
 import pandas as pd
 import numpy as np
 import streamlit as st
 from chatlas import ChatAnthropic
+
+# ─── Structured Logging (SRE) ─────────────────────────────────────────────────
+_LOG_FILE = Path(__file__).parent / "audit.log"
+logging.basicConfig(
+    level=logging.INFO,
+    format="%(asctime)s [%(levelname)s] %(message)s",
+    handlers=[
+        logging.StreamHandler(),
+        logging.FileHandler(str(_LOG_FILE), mode="a", encoding="utf-8"),
+    ],
+)
+_logger = logging.getLogger("data_analyst_bot")
+
+def _audit(action: str, detail: str = "") -> None:
+    """Write a structured audit log entry."""
+    _logger.info("ACTION=%s DETAIL=%s", action, str(detail)[:300])
 
 # ── Local imports ──────────────────────────────────────────────────────────────
 sys.path.insert(0, str(Path(__file__).parent))
@@ -146,6 +164,15 @@ TEXT = {
         "rate_limit_block":      "🚫 הגעת למגבלת {limit} שאלות בסשן. רענן את הדף להמשך.",
         "input_too_long":        "⚠️ השאלה קוצרה ל-{max} תווים",
         "onboarding_hint":       "💡 **איך להתחיל?** העלה קובץ ← שאל שאלה ב-AI Chat ← בנה גרפים ← הוסף לדשבורד",
+        "memory_warn":           "⚠️ הנתונים תופסים {mb} MB — ייתכן שהאפליקציה תהיה איטית",
+        # Technical Writer
+        "whats_new_hdr":         "🆕 מה חדש",
+        # Accessibility
+        "a11y_skip":             "דלג לתוכן הראשי",
+        # Ethics
+        "bias_warning":          "⚠️ עמודות רגישות זוהו: **{cols}** — שים לב להטיות אפשריות בניתוח",
+        "privacy_notice":        "🔒 **הודעת פרטיות:** הנתונים שלך נשלחים ל-API חיצוני (Anthropic) לצורך הניתוח. אל תעלה נתונים אישיים מזהים ללא הרשאה מתאימה.",
+        "privacy_ok":            "הבנתי ✓",
         # Email
         "email_hdr":             "📧 שלח במייל",
         "email_from":            "כתובת שולח (Gmail)",
@@ -281,6 +308,15 @@ TEXT = {
         "rate_limit_block":      "🚫 You have reached the {limit}-question session limit. Refresh to continue.",
         "input_too_long":        "⚠️ Question trimmed to {max} characters",
         "onboarding_hint":       "💡 **Getting started:** Upload a file ← Ask in AI Chat ← Build Charts ← Add to Dashboard",
+        "memory_warn":           "⚠️ Dataset is {mb} MB in memory — the app may run slowly",
+        # Technical Writer
+        "whats_new_hdr":         "🆕 What's New",
+        # Accessibility
+        "a11y_skip":             "Skip to main content",
+        # Ethics
+        "bias_warning":          "⚠️ Sensitive columns detected: **{cols}** — be aware of potential bias in analysis",
+        "privacy_notice":        "🔒 **Privacy Notice:** Your data is sent to an external API (Anthropic) for analysis. Do not upload personally identifiable information without appropriate authorisation.",
+        "privacy_ok":            "Got it ✓",
         # Email
         "email_hdr":             "📧 Send by Email",
         "email_from":            "From address (Gmail)",
@@ -299,21 +335,45 @@ TEXT = {
     },
 }
 
+# PROMPT_VERSION = "2.0"  — bump this when the prompt changes significantly
 SYSTEM_PROMPT = """
 You are an expert, bilingual Data Analyst assistant.
 Respond in the same language the user writes in (Hebrew or English).
 
-## Capabilities
-- Use get_data_overview() first to understand the dataset
-- Use run_analysis() for pandas computations (groupby, corr, filter, etc.)
-- Use create_chart() to visualize findings (ALWAYS visualize key insights)
-- Use suggest_next_analyses() to propose follow-up ideas
+## Analytical Process (Chain-of-Thought — always follow this order)
+1. FIRST call get_data_overview() to understand the dataset structure and column names.
+2. THEN call run_analysis() to compute the exact numbers needed to answer the question.
+3. ONLY THEN write your response — using only the numbers you actually computed.
+4. Visualize every key finding with create_chart().
+
+## Guardrails (STRICT — never violate)
+- ONLY report numbers and statistics that you computed with run_analysis().
+  Never estimate, approximate, or invent figures.
+- If you are unsure about a number, say "I need to verify this" and call run_analysis().
+- NEVER suggest modifying, deleting, or writing back to the user's data.
+- NEVER access external URLs, files, APIs, or services.
+- NEVER execute operating-system commands or import new libraries.
 
 ## Response Format
-1. 📊 **Key Findings** — bullet points with the main numbers
-2. 🔍 **Interpretation** — what the numbers mean
+1. 📊 **Key Findings** — bullet points with the exact numbers from run_analysis()
+2. 🔍 **Interpretation** — what the numbers mean in context
 3. 💡 **Insight / Recommendation** — business or analytical conclusion
 4. ➡️ **Follow-up** — 1–2 natural follow-up questions
+
+## Few-Shot Example
+User: "What are the top 3 products by revenue?"
+Thought process:
+  → call get_data_overview() to confirm column names
+  → call run_analysis("df.groupby('product')['revenue'].sum().nlargest(3)")
+  → call create_chart(chart_type='barh', x_column='product', y_column='revenue', title='Top 3 Products by Revenue')
+Response:
+  📊 **Key Findings**
+  - Laptop: $45,230 (32% of total)
+  - Phone: $38,100 (27%)
+  - Tablet: $21,500 (15%)
+  🔍 **Interpretation** — Electronics dominate revenue; Laptop alone accounts for nearly a third.
+  💡 **Insight** — Consider bundling Laptop with accessories to increase average basket size.
+  ➡️ **Follow-up** — Want to see revenue trend by month for these products?
 
 ## Chart Guidelines
 - barh  → many/long category names
@@ -1003,6 +1063,56 @@ body {{
 }}
 
 /* ═══════════════════════════════════════════════
+   ACCESSIBILITY (WCAG 2.1 AA)
+═══════════════════════════════════════════════ */
+
+/* Skip-to-main-content link (keyboard users) */
+.skip-link {{
+    position: absolute;
+    top: -40px;
+    left: 0;
+    background: #1a73e8;
+    color: white;
+    padding: 8px 16px;
+    border-radius: 0 0 4px 0;
+    font-weight: 600;
+    z-index: 9999;
+    text-decoration: none;
+    transition: top 0.2s;
+}}
+.skip-link:focus {{
+    top: 0;
+}}
+
+/* Visible focus ring on every interactive element */
+*:focus-visible {{
+    outline: 3px solid #1a73e8 !important;
+    outline-offset: 2px !important;
+    border-radius: 4px !important;
+}}
+/* Remove default outline only when :focus-visible is shown */
+*:focus:not(:focus-visible) {{
+    outline: none;
+}}
+
+/* Chart images — accessible alt description */
+.chart-wrap img {{
+    display: block;
+    max-width: 100%;
+}}
+
+/* Ensure sidebar caption text meets 4.5:1 contrast */
+.sidebar-label {{
+    color: #595959;  /* 7:1 ratio on white */
+}}
+.metric-label {{
+    color: #595959;
+}}
+.api-hint {{
+    color: #595959;
+}}
+
+/* ═══════════════════════════════════════════════
    HIGH-DPI / RETINA (image sharpness)
 ═══════════════════════════════════════════════ */
 @media (-webkit-min-device-pixel-ratio: 2), (min-resolution: 192dpi) {{
@@ -1133,6 +1243,9 @@ def init_state() -> None:
         st.session_state.email_subject = ""
     if "email_what" not in st.session_state:
         st.session_state.email_what = "html"
+    # Ethics / Privacy
+    if "_privacy_accepted" not in st.session_state:
+        st.session_state._privacy_accepted = False
 
 
 def get_active_key() -> str:
@@ -1202,6 +1315,49 @@ def make_sample_df() -> pd.DataFrame:
     # sprinkle a few NaNs
     df.loc[rng.choice(n, 15, replace=False), "satisfaction"] = np.nan
     return df
+
+
+_SENSITIVE_COLS = {
+    # English
+    "gender", "sex", "race", "ethnicity", "religion", "nationality",
+    "age", "disability", "sexual_orientation", "political_affiliation",
+    "marital_status", "salary", "income", "wage", "creditScore", "credit_score",
+    # Hebrew
+    "מגדר", "גזע", "דת", "לאום", "גיל", "נכות", "משכורת", "הכנסה",
+}
+
+_MEMORY_WARN_MB = 400  # warn when in-memory DataFrame exceeds this size
+
+
+def check_df_memory(df: pd.DataFrame) -> float:
+    """Return DataFrame memory usage in MB."""
+    return df.memory_usage(deep=True).sum() / 1024 / 1024
+
+
+def detect_sensitive_columns(df: pd.DataFrame) -> list:
+    """Return column names that may contain sensitive / protected attributes."""
+    found = []
+    for col in df.columns:
+        col_lower = col.lower().replace(" ", "_").replace("-", "_")
+        if any(s in col_lower for s in _SENSITIVE_COLS):
+            found.append(col)
+    return found
+
+
+def _friendly_error(err: Exception) -> str:
+    """Map common API / runtime exceptions to bilingual human-readable messages."""
+    msg = str(err).lower()
+    if "rate_limit" in msg or "429" in msg:
+        return "⏳ שרת ה-AI עמוס — נסה שוב בעוד כמה שניות / AI server busy — retry in a moment"
+    if "authentication" in msg or "401" in msg or ("invalid" in msg and "key" in msg):
+        return "🔑 מפתח ה-API שגוי — בדוק בסייד-בר / Invalid API key — check the sidebar"
+    if "timeout" in msg or "timed out" in msg:
+        return "⏱️ פסק הזמן — הנתונים עשויים להיות גדולים / Request timed out — data may be too large"
+    if "connection" in msg or "network" in msg:
+        return "🌐 בעיית חיבור לרשת / Network connection error"
+    if "context_length" in msg or "too long" in msg:
+        return "📏 הנתונים ארוכים מדי עבור הבקשה — נסה לסנן את הטבלה / Data too long — try filtering first"
+    return f"❌ {str(err)[:250]}"
 
 
 def load_uploaded_file(uploaded) -> pd.DataFrame:
@@ -1376,18 +1532,29 @@ def render_sidebar(T: dict) -> None:
                 try:
                     df = load_uploaded_file(uploaded)
                     _total_rows = len(df)
+                    # ── Large file sampling ────────────────────────────────
                     if _total_rows > _MAX_ROWS:
                         df = df.sample(_MAX_ROWS, random_state=42).reset_index(drop=True)
                         st.info(T["large_file_notice"].format(n=_MAX_ROWS, total=_total_rows))
+                    # ── Memory check (SRE) ────────────────────────────────
+                    _mb = check_df_memory(df)
+                    if _mb > _MEMORY_WARN_MB:
+                        st.warning(T["memory_warn"].format(mb=int(_mb)))
+                    # ── Bias / sensitive-column detection (Ethics) ────────
+                    _sensitive = detect_sensitive_columns(df)
+                    if _sensitive:
+                        st.warning(T["bias_warning"].format(cols=", ".join(_sensitive)))
                     tools.set_dataframe(df, name=uploaded.name)
                     st.session_state.data_loaded = True
                     st.session_state._uploaded_file_id = file_id
-                    st.session_state.chat = None   # rebuilt lazily
+                    st.session_state.chat = None
                     st.session_state.messages = []
                     st.session_state.dashboard_charts = []
                     st.session_state.data_warnings = validate_dataframe(df)
+                    _audit("FILE_UPLOAD", f"name={uploaded.name} rows={len(df)} cols={len(df.columns)} mb={_mb:.1f}")
                     st.success(f"✅ {uploaded.name}")
                 except Exception as e:
+                    _audit("FILE_UPLOAD_ERROR", str(e))
                     st.error(str(e))
 
         # ── Demo button ────────────────────────────────────────────────────
@@ -1535,6 +1702,24 @@ def render_sidebar(T: dict) -> None:
 
         st.markdown("---")
 
+        # ── What's New (Technical Writer) ──────────────────────────────────
+        _cl_path = Path(__file__).parent / "CHANGELOG.md"
+        if _cl_path.exists():
+            with st.expander(T["whats_new_hdr"], expanded=False):
+                _cl_lines = _cl_path.read_text(encoding="utf-8").splitlines()
+                # Extract the first versioned section (between first ## and second ##)
+                _section, _in = [], False
+                for _line in _cl_lines:
+                    if _line.startswith("## [") and not _line.startswith("## [Unreleased]"):
+                        if _in:
+                            break
+                        _in = True
+                    if _in:
+                        _section.append(_line)
+                st.markdown("\n".join(_section[:30]))
+
+        st.markdown("---")
+
         # ── Clear ──────────────────────────────────────────────────────────
         if st.button(T["clear_btn"], use_container_width=True):
             st.session_state.messages = []
@@ -1560,6 +1745,20 @@ def main() -> None:
     lang = st.session_state.lang
     T = TEXT[lang]
     inject_css(lang)
+    # Skip-to-main link for keyboard / screen-reader users
+    st.markdown(
+        f'<a class="skip-link" href="#main-content">{T["a11y_skip"]}</a>',
+        unsafe_allow_html=True,
+    )
+
+    # ── Privacy Notice (Ethics — shown once per session) ──────────────────
+    if not st.session_state._privacy_accepted:
+        with st.container():
+            st.info(T["privacy_notice"])
+            if st.button(T["privacy_ok"], key="privacy_ok_btn"):
+                st.session_state._privacy_accepted = True
+                _audit("PRIVACY_ACCEPTED")
+                st.rerun()
 
     # ── Header ────────────────────────────────────────────────────────────
     col_title, col_badge = st.columns([5, 1])
@@ -1690,19 +1889,27 @@ def main() -> None:
                 "role": "user", "content": final_input, "charts": [],
             })
 
+            _t0 = datetime.datetime.now()
             with st.chat_message("assistant"):
                 try:
                     full_text = st.write_stream(
                         text_stream(st.session_state.chat, final_input)
                     )
                 except Exception as err:
-                    st.error(f"{T['chat_error']}: {err}")
                     full_text = ""
+                    st.error(_friendly_error(err))
+                    _audit("CHAT_ERROR", str(err))
+                _elapsed = (datetime.datetime.now() - _t0).total_seconds()
                 chart_paths = tools.get_pending_charts()
                 for chart_path in chart_paths:
                     if chart_path.exists():
                         st.image(str(chart_path), use_container_width=True)
 
+            _audit(
+                "CHAT_RESPONSE",
+                f"q_len={len(final_input)} resp_len={len(full_text or '')} "
+                f"charts={len(chart_paths)} elapsed={_elapsed:.1f}s",
+            )
             st.session_state.messages.append({
                 "role": "assistant",
                 "content": full_text or "",
