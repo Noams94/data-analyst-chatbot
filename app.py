@@ -5,14 +5,12 @@ Bilingual (Hebrew / English) interface powered by chatlas + Claude Opus 4.6
 
 import os
 import sys
-import time
 from pathlib import Path
 
 import pandas as pd
 import numpy as np
 import streamlit as st
 from chatlas import ChatAnthropic
-from chatlas._turn import ContentToolRequest, ContentToolResult
 
 # ── Local imports ──────────────────────────────────────────────────────────────
 sys.path.insert(0, str(Path(__file__).parent))
@@ -119,6 +117,15 @@ TEXT = {
         "ollama_hint":        "הורד והפעל Ollama: ollama.com",
         "ollama_no_models":   "לא נמצאו מודלים. הפעל: ollama pull llama3.2",
         "ollama_refresh":     "🔄 רענן",
+        # הודעות נוספות
+        "no_key_hint":        "⚠️ הגדר מפתח API או חבר Ollama בסייד-בר",
+        "columns_expander":   "עמודות",
+        "data_showing":       "מציג {n:,} מתוך {total:,} שורות",
+        "no_numeric_cols":    "אין עמודות מספריות לסטטיסטיקות",
+        "chart_added_total":  "סה\"כ {n} גרפים בדשבורד",
+        "chat_error":         "❌ שגיאה בעיבוד השאלה",
+        "export_csv":         "⬇️ ייצא CSV",
+        "export_csv_help":    "הורד את הטבלה המסוננת כקובץ CSV",
     },
     "en": {
         "page_title":       "🤖 Data Analyst Chatbot",
@@ -210,6 +217,15 @@ TEXT = {
         "ollama_hint":        "Download & run Ollama: ollama.com",
         "ollama_no_models":   "No models found. Run: ollama pull llama3.2",
         "ollama_refresh":     "🔄 Refresh",
+        # Extra strings
+        "no_key_hint":        "⚠️ Configure API key or connect Ollama in the sidebar",
+        "columns_expander":   "Columns",
+        "data_showing":       "Showing {n:,} of {total:,} rows",
+        "no_numeric_cols":    "No numeric columns for statistics",
+        "chart_added_total":  "{n} charts in dashboard",
+        "chat_error":         "❌ Error processing your question",
+        "export_csv":         "⬇️ Export CSV",
+        "export_csv_help":    "Download the filtered table as a CSV file",
     },
 }
 
@@ -266,7 +282,6 @@ def get_ollama_models() -> tuple:
 
 def validate_dataframe(df: pd.DataFrame) -> list:
     """Return list of data-quality warnings (numeric-as-string, unparsed dates)."""
-    import re as _re
     warnings_list = []
     for col in df.select_dtypes(include="object").columns:
         sample = df[col].dropna().head(30).astype(str)
@@ -647,9 +662,15 @@ def get_active_key() -> str:
 def build_chat():
     """Build a chat object based on the current provider (Anthropic or Ollama)."""
     if st.session_state.get("provider", "anthropic") == "ollama":
+        model_name = st.session_state.get("ollama_model", "")
+        if not model_name:
+            raise ValueError(
+                "לא נבחר מודל Ollama — בחר מודל מהתפריט בסייד-בר לאחר הרצת: ollama pull llama3.2\n"
+                "No Ollama model selected — run: ollama pull llama3.2, then choose from the sidebar."
+            )
         from chatlas import ChatOllama
         chat = ChatOllama(
-            model=st.session_state.ollama_model or "llama3.2",
+            model=model_name,
             system_prompt=SYSTEM_PROMPT,
         )
     else:
@@ -868,25 +889,28 @@ def render_sidebar(T: dict) -> None:
             help=T["upload_help"],
         )
         if uploaded:
-            try:
-                df = load_uploaded_file(uploaded)
-                tools.set_dataframe(df, name=uploaded.name)
-                st.session_state.data_loaded = True
-                # Reset chat when new file is uploaded
-                st.session_state.chat = build_chat()
-                st.session_state.messages = []
-                st.session_state.dashboard_charts = []
-                st.session_state.data_warnings = validate_dataframe(df)
-                st.success(f"✅ {uploaded.name}")
-            except Exception as e:
-                st.error(str(e))
+            file_id = f"{uploaded.name}_{uploaded.size}"
+            if file_id != st.session_state.get("_uploaded_file_id"):
+                try:
+                    df = load_uploaded_file(uploaded)
+                    tools.set_dataframe(df, name=uploaded.name)
+                    st.session_state.data_loaded = True
+                    st.session_state._uploaded_file_id = file_id
+                    st.session_state.chat = None   # rebuilt lazily
+                    st.session_state.messages = []
+                    st.session_state.dashboard_charts = []
+                    st.session_state.data_warnings = validate_dataframe(df)
+                    st.success(f"✅ {uploaded.name}")
+                except Exception as e:
+                    st.error(str(e))
 
         # ── Demo button ────────────────────────────────────────────────────
         if st.button(T["demo_btn"], use_container_width=True):
             df = make_sample_df()
             tools.set_dataframe(df, name="sample_sales.csv")
             st.session_state.data_loaded = True
-            st.session_state.chat = build_chat()
+            st.session_state.chat = None   # rebuilt lazily in main()
+            st.session_state._uploaded_file_id = None
             st.session_state.messages = []
             st.session_state.dashboard_charts = []
             st.session_state.data_warnings = validate_dataframe(df)
@@ -916,7 +940,7 @@ def render_sidebar(T: dict) -> None:
             type_str = " · ".join(f"{v}× {k}" for k, v in dtype_counts.items())
             st.caption(type_str)
 
-            with st.expander("Columns"):
+            with st.expander(T["columns_expander"]):
                 for col in df.columns:
                     dtype = str(df[col].dtype)
                     null_pct = df[col].isna().mean() * 100
@@ -941,7 +965,7 @@ def render_sidebar(T: dict) -> None:
         # ── Clear ──────────────────────────────────────────────────────────
         if st.button(T["clear_btn"], use_container_width=True):
             st.session_state.messages = []
-            st.session_state.chat = build_chat() if st.session_state.data_loaded else None
+            st.session_state.chat = None   # rebuilt lazily
             st.rerun()
 
 
@@ -985,7 +1009,10 @@ def main() -> None:
 
     # ── Ensure chat object exists ─────────────────────────────────────────
     if st.session_state.chat is None and st.session_state.data_loaded:
-        st.session_state.chat = build_chat()
+        try:
+            st.session_state.chat = build_chat()
+        except ValueError:
+            pass  # Ollama not configured yet — chat stays None
 
     # ── Tabs ──────────────────────────────────────────────────────────────
     tab_chat, tab_charts, tab_dashboard, tab_data = st.tabs([
@@ -1013,13 +1040,20 @@ def main() -> None:
                           and bool(st.session_state.ollama_model))
         else:
             no_key = not bool(get_active_key())
-        no_data  = tools.get_dataframe() is None
+        no_data = tools.get_dataframe() is None
         user_input = st.chat_input(
             T["input_placeholder"],
             disabled=(no_key or no_data),
         )
 
-        final_input = pre_fill or user_input
+        # Show contextual hint when chat input is disabled
+        if no_data:
+            st.caption(T["no_data_warn"])
+        elif no_key:
+            st.caption(T["no_key_hint"])
+
+        # Guard: quick-question buttons must also respect disabled state
+        final_input = (pre_fill if not (no_key or no_data) else None) or user_input
 
         if final_input and st.session_state.chat:
             with st.chat_message("user"):
@@ -1029,11 +1063,13 @@ def main() -> None:
             })
 
             with st.chat_message("assistant"):
-                with st.spinner(T["thinking"]):
-                    time.sleep(0.05)
-                full_text = st.write_stream(
-                    text_stream(st.session_state.chat, final_input)
-                )
+                try:
+                    full_text = st.write_stream(
+                        text_stream(st.session_state.chat, final_input)
+                    )
+                except Exception as err:
+                    st.error(f"{T['chat_error']}: {err}")
+                    full_text = ""
                 chart_paths = tools.get_pending_charts()
                 for chart_path in chart_paths:
                     if chart_path.exists():
@@ -1123,8 +1159,8 @@ def main() -> None:
             if st.button(T["add_to_dash"], key="add_to_dashboard"):
                 cfg_to_save = {**cfg, "sample_size": chart_sample}
                 st.session_state.dashboard_charts.append(cfg_to_save)
-                st.success(f'{T["chart_added"]} '
-                           f'סה"כ {len(st.session_state.dashboard_charts)} גרפים.')
+                n_charts = len(st.session_state.dashboard_charts)
+                st.success(f'{T["chart_added"]} {T["chart_added_total"].format(n=n_charts)}')
 
     # ═══════════════════════════════════════════════════════════════════════
     # Tab 3 – Dashboard
@@ -1230,7 +1266,20 @@ def main() -> None:
                 display_df = display_df[mask]
 
             st.dataframe(display_df, use_container_width=True, height=420)
-            st.caption(f"מציג {len(display_df):,} מתוך {len(df_now):,} שורות")
+
+            cap_col, dl_col = st.columns([4, 1])
+            with cap_col:
+                st.caption(T["data_showing"].format(n=len(display_df), total=len(df_now)))
+            with dl_col:
+                csv_bytes = display_df.to_csv(index=False).encode("utf-8-sig")
+                st.download_button(
+                    label=T["export_csv"],
+                    data=csv_bytes,
+                    file_name=f"{tools.get_data_name() or 'data'}.csv",
+                    mime="text/csv",
+                    help=T["export_csv_help"],
+                    use_container_width=True,
+                )
 
             # ── Detailed stats ────────────────────────────────────────
             if st.checkbox(T["data_stats_chk"], key="data_stats_cb"):
@@ -1238,7 +1287,7 @@ def main() -> None:
                 if not num_only.empty:
                     st.dataframe(num_only.describe().round(2), use_container_width=True)
                 else:
-                    st.info("אין עמודות מספריות לסטטיסטיקות")
+                    st.info(T["no_numeric_cols"])
 
 
 if __name__ == "__main__":
