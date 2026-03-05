@@ -683,8 +683,8 @@ def send_email_smtp(
     password: str,
     to_addr: str,
     subject: str,
-    body_html: str | None = None,
-    attachment_bytes: bytes | None = None,
+    body_html=None,
+    attachment_bytes=None,
     attachment_name: str = "data.csv",
 ) -> None:
     """Send email via Gmail SMTP (TLS). Raises on failure."""
