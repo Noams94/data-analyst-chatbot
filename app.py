@@ -138,6 +138,23 @@ TEXT = {
         "export_dashboard_help": "הורד את כל הגרפים בדשבורד כ-HTML אינטראקטיבי",
         "export_ai_charts":      "🖼 הורד גרפי AI (ZIP)",
         "export_ai_charts_help": "הורד את כל גרפי ה-AI שנוצרו בשיחה",
+        "export_pdf":            "📑 ייצא שיחה (PDF)",
+        "export_pdf_help":       "הורד את השיחה כקובץ PDF עם גרפים",
+        # Email
+        "email_hdr":             "📧 שלח במייל",
+        "email_from":            "כתובת שולח (Gmail)",
+        "email_password":        "App Password",
+        "email_to":              "כתובת נמען",
+        "email_subject":         "נושא",
+        "email_what":            "מה לשלוח?",
+        "email_what_html":       "שיחה (HTML)",
+        "email_what_csv":        "נתונים (CSV)",
+        "email_send":            "📤 שלח",
+        "email_sent_ok":         "✅ המייל נשלח!",
+        "email_sent_err":        "❌ שגיאה בשליחה: {err}",
+        "email_hint":            "Gmail: הגדר App Password ב-myaccount.google.com/apppasswords",
+        "email_no_data":         "⚠️ אין נתונים לשליחה",
+        "email_no_chat":         "⚠️ אין שיחה לשליחה",
     },
     "en": {
         "page_title":       "🤖 Data Analyst Chatbot",
@@ -250,6 +267,23 @@ TEXT = {
         "export_dashboard_help": "Download all dashboard charts as an interactive HTML file",
         "export_ai_charts":      "🖼 Download AI Charts (ZIP)",
         "export_ai_charts_help": "Download all AI-generated charts from this conversation",
+        "export_pdf":            "📑 Export Chat (PDF)",
+        "export_pdf_help":       "Download the conversation as a PDF with charts",
+        # Email
+        "email_hdr":             "📧 Send by Email",
+        "email_from":            "From address (Gmail)",
+        "email_password":        "App Password",
+        "email_to":              "Recipient address",
+        "email_subject":         "Subject",
+        "email_what":            "What to send?",
+        "email_what_html":       "Conversation (HTML)",
+        "email_what_csv":        "Data (CSV)",
+        "email_send":            "📤 Send",
+        "email_sent_ok":         "✅ Email sent!",
+        "email_sent_err":        "❌ Send error: {err}",
+        "email_hint":            "Gmail: create an App Password at myaccount.google.com/apppasswords",
+        "email_no_data":         "⚠️ No data to send",
+        "email_no_chat":         "⚠️ No conversation to send",
     },
 }
 
@@ -570,6 +604,120 @@ def export_ai_charts_zip(messages: list) -> bytes:
     return buf.getvalue()
 
 
+def export_chat_pdf(messages: list, title: str = "Chat Export") -> bytes:
+    """Return PDF bytes of the conversation with embedded chart images."""
+    try:
+        from fpdf import FPDF
+        import matplotlib
+        from bidi.algorithm import get_display
+    except ImportError:
+        return b""
+
+    # DejaVuSans from matplotlib — full Unicode + Hebrew support
+    font_path = (
+        Path(matplotlib.__file__).parent / "mpl-data" / "fonts" / "ttf" / "DejaVuSans.ttf"
+    )
+
+    def _is_rtl(text: str) -> bool:
+        return any("\u0590" <= c <= "\u05FF" for c in text)
+
+    def _fix(text: str) -> str:
+        return get_display(text) if _is_rtl(text) else text
+
+    pdf = FPDF()
+    pdf.set_auto_page_break(auto=True, margin=15)
+    if font_path.exists():
+        pdf.add_font("DejaVu", "", str(font_path), uni=True)
+        fnt = "DejaVu"
+    else:
+        fnt = "Helvetica"
+
+    pdf.add_page()
+    pdf.set_font(fnt, size=18)
+    pdf.cell(0, 10, _fix(title), align="R" if _is_rtl(title) else "L", ln=True)
+    pdf.ln(4)
+
+    for msg in messages:
+        role = msg.get("role", "")
+        content = msg.get("content", "")
+        charts = msg.get("charts", [])
+
+        # Role label
+        pdf.set_font(fnt, size=9)
+        pdf.set_fill_color(230, 240, 255) if role == "assistant" else pdf.set_fill_color(230, 250, 230)
+        pdf.set_text_color(80, 80, 80)
+        label = "Assistant:" if role == "assistant" else "User:"
+        pdf.cell(0, 6, label, fill=True, ln=True)
+
+        # Message lines
+        pdf.set_font(fnt, size=10)
+        pdf.set_text_color(30, 30, 30)
+        for line in content.split("\n"):
+            clean = line.strip()
+            if not clean:
+                pdf.ln(2)
+                continue
+            # Strip markdown bullets/headers to avoid junk chars
+            clean = clean.lstrip("*#>-").strip()
+            if not clean:
+                continue
+            fixed = _fix(clean)
+            pdf.multi_cell(0, 5, fixed, align="R" if _is_rtl(clean) else "L")
+
+        # Embedded chart images
+        for chart_path in charts:
+            p = Path(chart_path)
+            if p.exists():
+                if pdf.get_y() > 220:
+                    pdf.add_page()
+                pdf.image(str(p), x=10, w=180)
+                pdf.ln(3)
+
+        pdf.ln(3)
+
+    return bytes(pdf.output())
+
+
+def send_email_smtp(
+    from_addr: str,
+    password: str,
+    to_addr: str,
+    subject: str,
+    body_html: str | None = None,
+    attachment_bytes: bytes | None = None,
+    attachment_name: str = "data.csv",
+) -> None:
+    """Send email via Gmail SMTP (TLS). Raises on failure."""
+    import smtplib
+    from email.mime.multipart import MIMEMultipart
+    from email.mime.text import MIMEText
+    from email.mime.base import MIMEBase
+    from email import encoders
+
+    msg = MIMEMultipart("mixed")
+    msg["From"] = from_addr
+    msg["To"] = to_addr
+    msg["Subject"] = subject
+
+    msg.attach(MIMEText(body_html or subject, "html" if body_html else "plain", "utf-8"))
+
+    if attachment_bytes:
+        part = MIMEBase("application", "octet-stream")
+        part.set_payload(attachment_bytes)
+        encoders.encode_base64(part)
+        part.add_header(
+            "Content-Disposition",
+            f'attachment; filename="{attachment_name}"',
+        )
+        msg.attach(part)
+
+    with smtplib.SMTP("smtp.gmail.com", 587) as server:
+        server.ehlo()
+        server.starttls()
+        server.login(from_addr, password)
+        server.sendmail(from_addr, to_addr, msg.as_string())
+
+
 # ─── Custom CSS ───────────────────────────────────────────────────────────────
 def inject_css(lang: str) -> None:
     direction = "rtl" if lang == "he" else "ltr"
@@ -779,6 +927,15 @@ def init_state() -> None:
         st.session_state.chart_ai_palette = "husl"
     if "chart_figsize_lbl" not in st.session_state:
         st.session_state.chart_figsize_lbl = "10×5"
+    # Email config (cleared on browser close — stored only in session state)
+    if "email_from" not in st.session_state:
+        st.session_state.email_from = ""
+    if "email_to" not in st.session_state:
+        st.session_state.email_to = ""
+    if "email_subject" not in st.session_state:
+        st.session_state.email_subject = ""
+    if "email_what" not in st.session_state:
+        st.session_state.email_what = "html"
 
 
 def get_active_key() -> str:
@@ -1120,6 +1277,62 @@ def render_sidebar(T: dict) -> None:
 
         st.markdown("---")
 
+        # ── Email ──────────────────────────────────────────────────────────
+        with st.expander(T["email_hdr"], expanded=False):
+            st.caption(T["email_hint"])
+            _efrom = st.text_input(
+                T["email_from"], value=st.session_state.email_from,
+                key="email_from_inp", placeholder="you@gmail.com",
+            )
+            _epwd = st.text_input(
+                T["email_password"], value="",
+                type="password", key="email_pwd_inp",
+                placeholder="xxxx xxxx xxxx xxxx",
+            )
+            _eto = st.text_input(
+                T["email_to"], value=st.session_state.email_to,
+                key="email_to_inp", placeholder="recipient@example.com",
+            )
+            _esubj = st.text_input(
+                T["email_subject"], value=st.session_state.email_subject,
+                key="email_subj_inp",
+            )
+            _ewhat = st.radio(
+                T["email_what"],
+                options=["html", "csv"],
+                format_func=lambda x: T["email_what_html"] if x == "html" else T["email_what_csv"],
+                horizontal=True, key="email_what_radio",
+            )
+            if st.button(T["email_send"], use_container_width=True, key="email_send_btn"):
+                # Persist non-sensitive fields
+                st.session_state.email_from = _efrom
+                st.session_state.email_to = _eto
+                st.session_state.email_subject = _esubj
+                st.session_state.email_what = _ewhat
+                _df_now = tools.get_dataframe()
+                try:
+                    if _ewhat == "html":
+                        if not st.session_state.messages:
+                            st.warning(T["email_no_chat"])
+                        else:
+                            _body = export_chat_html(st.session_state.messages, T["page_title"]).decode("utf-8")
+                            send_email_smtp(_efrom, _epwd, _eto, _esubj or T["page_title"], body_html=_body)
+                            st.success(T["email_sent_ok"])
+                    else:
+                        if _df_now is None:
+                            st.warning(T["email_no_data"])
+                        else:
+                            _csv_bytes = _df_now.to_csv(index=False).encode("utf-8-sig")
+                            send_email_smtp(
+                                _efrom, _epwd, _eto, _esubj or T["page_title"],
+                                attachment_bytes=_csv_bytes, attachment_name="data.csv",
+                            )
+                            st.success(T["email_sent_ok"])
+                except Exception as _ex:
+                    st.error(T["email_sent_err"].format(err=str(_ex)))
+
+        st.markdown("---")
+
         # ── Clear ──────────────────────────────────────────────────────────
         if st.button(T["clear_btn"], use_container_width=True):
             st.session_state.messages = []
@@ -1191,7 +1404,7 @@ def main() -> None:
         else:
             # ── Export row ────────────────────────────────────────────────
             _has_charts = any(msg.get("charts") for msg in st.session_state.messages)
-            _ec1, _ec2, _ = st.columns([1, 1, 4])
+            _ec1, _ec2, _ec3, _ = st.columns([1, 1, 1, 3])
             with _ec1:
                 st.download_button(
                     T["export_chat"],
@@ -1203,6 +1416,16 @@ def main() -> None:
                     key="export_chat_btn",
                 )
             with _ec2:
+                st.download_button(
+                    T["export_pdf"],
+                    data=export_chat_pdf(st.session_state.messages, T["page_title"]),
+                    file_name="chat_export.pdf",
+                    mime="application/pdf",
+                    help=T["export_pdf_help"],
+                    use_container_width=True,
+                    key="export_pdf_btn",
+                )
+            with _ec3:
                 st.download_button(
                     T["export_ai_charts"],
                     data=export_ai_charts_zip(st.session_state.messages),
