@@ -126,6 +126,11 @@ TEXT = {
         "chat_error":         "❌ שגיאה בעיבוד השאלה",
         "export_csv":         "⬇️ ייצא CSV",
         "export_csv_help":    "הורד את הטבלה המסוננת כקובץ CSV",
+        # עיצוב גרפי AI
+        "chart_settings_hdr": "🎨 עיצוב גרפי AI",
+        "chart_seaborn_style":"סגנון רקע",
+        "chart_ai_palette":   "פלטת צבעים",
+        "chart_figsize":      "גודל גרף",
     },
     "en": {
         "page_title":       "🤖 Data Analyst Chatbot",
@@ -226,6 +231,11 @@ TEXT = {
         "chat_error":         "❌ Error processing your question",
         "export_csv":         "⬇️ Export CSV",
         "export_csv_help":    "Download the filtered table as a CSV file",
+        # AI chart styling
+        "chart_settings_hdr": "🎨 AI Chart Style",
+        "chart_seaborn_style":"Background style",
+        "chart_ai_palette":   "Color palette",
+        "chart_figsize":      "Figure size",
     },
 }
 
@@ -652,6 +662,13 @@ def init_state() -> None:
         st.session_state.ollama_models = []
     if "ollama_queried" not in st.session_state:
         st.session_state.ollama_queried = False
+    # Chart style (for AI/matplotlib charts)
+    if "chart_seaborn_style" not in st.session_state:
+        st.session_state.chart_seaborn_style = "whitegrid"
+    if "chart_ai_palette" not in st.session_state:
+        st.session_state.chart_ai_palette = "husl"
+    if "chart_figsize_lbl" not in st.session_state:
+        st.session_state.chart_figsize_lbl = "10×5"
 
 
 def get_active_key() -> str:
@@ -959,6 +976,37 @@ def render_sidebar(T: dict) -> None:
             for q in T["quick_qs"]:
                 if st.button(q, key=f"quick_{q}", use_container_width=True):
                     st.session_state.pending_input = q
+
+        st.markdown("---")
+
+        # ── AI Chart Style ─────────────────────────────────────────────────
+        _STYLES  = ["whitegrid", "darkgrid", "white", "ticks"]
+        _PALETTES = ["husl", "deep", "muted", "Set2", "tab10", "viridis", "rocket"]
+        _SIZES   = {"10×5": (10, 5), "12×6": (12, 6), "8×4": (8, 4), "14×7": (14, 7)}
+        with st.expander(T["chart_settings_hdr"], expanded=False):
+            style_val = st.selectbox(
+                T["chart_seaborn_style"], _STYLES,
+                index=_STYLES.index(st.session_state.chart_seaborn_style),
+                key="chart_style_sel",
+            )
+            pal_val = st.selectbox(
+                T["chart_ai_palette"], _PALETTES,
+                index=_PALETTES.index(st.session_state.chart_ai_palette),
+                key="chart_pal_sel",
+            )
+            size_lbl = st.selectbox(
+                T["chart_figsize"], list(_SIZES.keys()),
+                index=list(_SIZES.keys()).index(st.session_state.chart_figsize_lbl),
+                key="chart_size_sel",
+            )
+            st.session_state.chart_seaborn_style = style_val
+            st.session_state.chart_ai_palette = pal_val
+            st.session_state.chart_figsize_lbl = size_lbl
+            tools.set_chart_style(
+                seaborn_style=style_val,
+                palette=pal_val,
+                figsize=_SIZES[size_lbl],
+            )
 
         st.markdown("---")
 

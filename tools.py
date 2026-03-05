@@ -37,6 +37,23 @@ plt.rcParams.update({
 })
 sns.set_palette("husl")
 
+# ─── Chart Style State ────────────────────────────────────────────────────────
+
+_chart_style: dict = {
+    "seaborn_style": "whitegrid",
+    "palette": "husl",
+    "dpi": 130,
+    "figsize": (10, 5),
+}
+
+# Month name → sort index (English + Hebrew)
+_MONTH_ORDER: dict = {m.lower(): i for i, m in enumerate([
+    "january", "february", "march", "april", "may", "june",
+    "july", "august", "september", "october", "november", "december",
+    "ינואר", "פברואר", "מרץ", "אפריל", "מאי", "יוני",
+    "יולי", "אוגוסט", "ספטמבר", "אוקטובר", "נובמבר", "דצמבר",
+])}
+
 # ─── Public API for Streamlit ─────────────────────────────────────────────────
 
 def set_dataframe(df: pd.DataFrame, name: str = "uploaded_data") -> None:
@@ -52,6 +69,49 @@ def get_dataframe() -> Optional[pd.DataFrame]:
 
 def get_data_name() -> str:
     return _data_name
+
+
+def set_chart_style(
+    seaborn_style: str = "whitegrid",
+    palette: str = "husl",
+    dpi: int = 130,
+    figsize: tuple = (10, 5),
+) -> None:
+    """Update chart style preferences (called from the Streamlit UI)."""
+    global _chart_style
+    _chart_style = {
+        "seaborn_style": seaborn_style,
+        "palette": palette,
+        "dpi": dpi,
+        "figsize": figsize,
+    }
+    plt.rcParams["figure.dpi"] = dpi
+    plt.rcParams["figure.figsize"] = list(figsize)
+    sns.set_palette(palette)
+    sns.set_style(seaborn_style)
+
+
+def _fix_rtl(text: str) -> str:
+    """Reorder Hebrew/Arabic RTL text for matplotlib's left-to-right renderer."""
+    if not text:
+        return text
+    try:
+        from bidi.algorithm import get_display
+        return get_display(text)
+    except ImportError:
+        return text
+
+
+def _sort_chronological(grp_df: pd.DataFrame, x_col: str):
+    """
+    If x_col contains month names, return the df sorted chronologically.
+    Returns None when no month names are detected.
+    """
+    sample = [str(v).lower() for v in grp_df[x_col].head(12)]
+    if not any(v in _MONTH_ORDER for v in sample):
+        return None
+    order = grp_df[x_col].apply(lambda v: _MONTH_ORDER.get(str(v).lower(), 99))
+    return grp_df.iloc[order.argsort().values].reset_index(drop=True)
 
 
 def get_pending_charts() -> list[Path]:
@@ -178,7 +238,12 @@ def create_chart(
         return "⚠️ No dataset loaded."
 
     df = _df.copy()
-    fig, ax = plt.subplots()
+    sns.set_style(_chart_style["seaborn_style"])
+    sns.set_palette(_chart_style["palette"])
+    fig, ax = plt.subplots(
+        figsize=_chart_style["figsize"],
+        dpi=_chart_style["dpi"],
+    )
     t = chart_type.lower().strip()
 
     try:
@@ -187,21 +252,25 @@ def create_chart(
             corr = num_df.corr()
             sns.heatmap(corr, annot=True, fmt=".2f", cmap="coolwarm",
                         center=0, square=True, ax=ax, cbar_kws={"shrink": 0.8})
-            ax.set_title(title or "Correlation Heatmap")
+            ax.set_title(_fix_rtl(title) if title else "Correlation Heatmap")
 
         elif t == "hist":
             df[x_column].dropna().plot.hist(bins=bins, ax=ax,
                                              edgecolor="white", linewidth=0.5)
-            ax.set_xlabel(x_column)
+            ax.set_xlabel(_fix_rtl(x_column))
             ax.set_ylabel("Frequency")
-            ax.set_title(title or f"Distribution of {x_column}")
+            ax.set_title(_fix_rtl(title) if title else _fix_rtl(f"Distribution of {x_column}"))
 
         elif t in ("bar", "barh", "line"):
             agg = aggregation or "sum"
             if y_column:
                 grp = df.groupby(x_column)[y_column].agg(agg).reset_index()
                 grp.columns = [x_column, y_column]
-                if sort:
+                # Prefer chronological order when x contains month names
+                chr_grp = _sort_chronological(grp, x_column)
+                if chr_grp is not None:
+                    grp = chr_grp
+                elif sort:
                     grp = grp.sort_values(y_column, ascending=(t == "barh"))
                 if top_n > 0:
                     grp = grp.tail(top_n) if t == "barh" else grp.head(top_n)
@@ -216,53 +285,55 @@ def create_chart(
                 xv, yv = vc.index, vc.values
                 ylabel = "Count"
 
+            xv_rtl = [_fix_rtl(str(v)) for v in xv]
             if t == "line":
                 ax.plot(range(len(xv)), yv, marker="o", linewidth=2, markersize=5)
                 ax.fill_between(range(len(xv)), yv, alpha=0.1)
                 ax.set_xticks(range(len(xv)))
-                ax.set_xticklabels(xv, rotation=45, ha="right")
-                ax.set_ylabel(ylabel)
+                ax.set_xticklabels(xv_rtl, rotation=45, ha="right")
+                ax.set_ylabel(_fix_rtl(ylabel))
             elif t == "barh":
-                bars = ax.barh(range(len(xv)), yv)
+                ax.barh(range(len(xv)), yv)
                 ax.set_yticks(range(len(xv)))
-                ax.set_yticklabels(xv, fontsize=9)
-                ax.set_xlabel(ylabel)
+                ax.set_yticklabels(xv_rtl, fontsize=9)
+                ax.set_xlabel(_fix_rtl(ylabel))
             else:
                 ax.bar(range(len(xv)), yv)
                 ax.set_xticks(range(len(xv)))
-                ax.set_xticklabels(xv, rotation=45, ha="right", fontsize=9)
-                ax.set_ylabel(ylabel)
+                ax.set_xticklabels(xv_rtl, rotation=45, ha="right", fontsize=9)
+                ax.set_ylabel(_fix_rtl(ylabel))
 
             if t != "barh":
-                ax.set_xlabel(x_column)
-            ax.set_title(title or f"{ylabel} by {x_column}")
+                ax.set_xlabel(_fix_rtl(x_column))
+            ax.set_title(_fix_rtl(title or f"{ylabel} by {x_column}"))
 
         elif t == "scatter":
             kw = {"alpha": 0.55, "s": 35, "edgecolors": "none"}
             if color_column and color_column in df.columns:
                 for val, grp in df.groupby(color_column):
-                    ax.scatter(grp[x_column], grp[y_column], label=str(val), **kw)
-                ax.legend(title=color_column, bbox_to_anchor=(1.02, 1), loc="upper left",
-                          fontsize=8, title_fontsize=8)
+                    ax.scatter(grp[x_column], grp[y_column], label=_fix_rtl(str(val)), **kw)
+                ax.legend(title=_fix_rtl(color_column), bbox_to_anchor=(1.02, 1),
+                          loc="upper left", fontsize=8, title_fontsize=8)
             else:
                 ax.scatter(df[x_column], df[y_column], **kw)
-            ax.set_xlabel(x_column)
-            ax.set_ylabel(y_column)
-            ax.set_title(title or f"{y_column} vs {x_column}")
+            ax.set_xlabel(_fix_rtl(x_column))
+            ax.set_ylabel(_fix_rtl(y_column))
+            ax.set_title(_fix_rtl(title) if title else _fix_rtl(f"{y_column} vs {x_column}"))
 
         elif t == "box":
             if x_column and x_column in df.columns:
                 groups = df[x_column].unique()
                 data = [df[df[x_column] == g][y_column].dropna() for g in groups]
-                bp = ax.boxplot(data, labels=groups, patch_artist=True)
-                colors = sns.color_palette("husl", len(groups))
+                bp = ax.boxplot(data, labels=[_fix_rtl(str(g)) for g in groups],
+                                patch_artist=True)
+                colors = sns.color_palette(_chart_style["palette"], len(groups))
                 for patch, color in zip(bp["boxes"], colors):
                     patch.set_facecolor(color + (0.5,))
             else:
                 ax.boxplot(df[y_column].dropna(), patch_artist=True)
             plt.xticks(rotation=40, ha="right", fontsize=9)
-            ax.set_ylabel(y_column)
-            ax.set_title(title or f"Distribution of {y_column}")
+            ax.set_ylabel(_fix_rtl(y_column))
+            ax.set_title(_fix_rtl(title) if title else _fix_rtl(f"Distribution of {y_column}"))
 
         elif t in ("pie", "count"):
             if t == "pie":
@@ -270,6 +341,7 @@ def create_chart(
                         if y_column else df[x_column].value_counts())
                 if top_n > 0:
                     vals = vals.head(top_n)
+                vals.index = [_fix_rtl(str(v)) for v in vals.index]
                 vals.plot.pie(ax=ax, autopct="%1.1f%%", startangle=90,
                               pctdistance=0.8, labeldistance=1.1)
                 ax.set_ylabel("")
@@ -277,10 +349,11 @@ def create_chart(
                 vc = df[x_column].value_counts()
                 if top_n > 0:
                     vc = vc.head(top_n)
+                vc.index = [_fix_rtl(str(v)) for v in vc.index]
                 vc.plot.bar(ax=ax)
                 plt.xticks(rotation=45, ha="right", fontsize=9)
                 ax.set_ylabel("Count")
-            ax.set_title(title or f"Distribution of {x_column}")
+            ax.set_title(_fix_rtl(title) if title else _fix_rtl(f"Distribution of {x_column}"))
 
         else:
             return (f"Unknown chart_type: '{chart_type}'. "
