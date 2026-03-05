@@ -197,6 +197,25 @@ TEXT = {
         "export_report_help":    "דוח מסודר של השיחה עם כל הממצאים והגרפים",
         # כפתורי export בתחתית הצ'אט
         "exports_lbl":           "⬇️ ייצוא שיחה",
+        # inline upload (step 0)
+        "upload_inline_title":   "👋 שלום! בואו נתחיל",
+        "upload_inline_sub":     "העלה קובץ נתונים — CSV, Excel, JSON, Parquet",
+        "upload_inline_or":      "— או —",
+        "upload_inline_demo":    "🎲 נסה עם דאטה לדוגמה",
+        # dataset summary (הודעה ראשונה)
+        "ds_rows":               "שורות",
+        "ds_cols":               "עמודות",
+        "ds_numeric":            "מספריות",
+        "ds_categorical":        "קטגוריות",
+        "ds_dates":              "תאריכים",
+        "ds_missing_ok":         "✅ אין ערכים חסרים",
+        "ds_missing_warn":       "⚠️ {n:,} ערכים חסרים",
+        "ds_prompt":             "💡 מה תרצה לנתח?",
+        # chips
+        "quick_chips_lbl":       "💡 שאלות להמשך:",
+        # tabs חדשים בדשבורד
+        "chart_builder_hdr":     "📊 בנה גרף ידני",
+        "data_view_hdr":         "🗂 צפייה בנתונים",
     },
     "en": {
         "page_title":       "🤖 Data Analyst Chatbot",
@@ -350,6 +369,25 @@ TEXT = {
         "export_report_help":    "Structured report of the conversation with all findings and charts",
         # export buttons label
         "exports_lbl":           "⬇️ Export conversation",
+        # inline upload (step 0)
+        "upload_inline_title":   "👋 Welcome! Let's get started",
+        "upload_inline_sub":     "Upload a data file — CSV, Excel, JSON, Parquet",
+        "upload_inline_or":      "— or —",
+        "upload_inline_demo":    "🎲 Try with sample data",
+        # dataset summary
+        "ds_rows":               "Rows",
+        "ds_cols":               "Columns",
+        "ds_numeric":            "Numeric",
+        "ds_categorical":        "Categorical",
+        "ds_dates":              "Dates",
+        "ds_missing_ok":         "✅ No missing values",
+        "ds_missing_warn":       "⚠️ {n:,} missing values",
+        "ds_prompt":             "💡 What would you like to analyse?",
+        # chips
+        "quick_chips_lbl":       "💡 Suggested questions:",
+        # dashboard tab sections
+        "chart_builder_hdr":     "📊 Build a Chart",
+        "data_view_hdr":         "🗂 Data View",
     },
 }
 
@@ -1070,6 +1108,60 @@ body {{
     direction: {direction};
 }}
 
+/* ── Inline upload zone (step 0) ── */
+.upload-zone {{
+    border: 2px dashed #1a73e8;
+    border-radius: 16px;
+    padding: 40px 24px 32px;
+    text-align: center;
+    background: linear-gradient(135deg, #e8f0fe55, #f0f6ff88);
+    margin: 20px auto;
+    max-width: 560px;
+    direction: {direction};
+}}
+.upload-zone h2 {{
+    color: #1a73e8;
+    margin-bottom: 4px;
+    font-size: 1.4rem;
+}}
+.upload-zone p {{
+    color: #666;
+    margin: 0 0 16px;
+    font-size: .95rem;
+}}
+.upload-divider {{
+    color: #aaa;
+    font-size: .85rem;
+    margin: 14px 0;
+    letter-spacing: 1px;
+}}
+
+/* ── Quick-question chips row ── */
+.chips-label {{
+    font-size: .82em;
+    color: #888;
+    margin: 14px 0 6px;
+    font-weight: 500;
+}}
+div[data-testid="stHorizontalBlock"] > div[data-testid="stColumn"] > div[data-testid="stButton"] > button.chip-btn {{
+    background: #e8f0fe;
+    color: #1a73e8;
+    border: 1px solid #c5d8fb;
+    border-radius: 20px;
+    font-size: .83em;
+    padding: 3px 14px;
+    min-height: 32px;
+}}
+div[data-testid="stButton"].chip-wrap button {{
+    background: #e8f0fe !important;
+    color: #1a73e8 !important;
+    border: 1px solid #c5d8fb !important;
+    border-radius: 20px !important;
+    font-size: .83em !important;
+    min-height: 32px !important;
+    white-space: nowrap;
+}}
+
 /* ── API key status badge ── */
 .api-badge-ok {{
     display: inline-flex;
@@ -1611,6 +1703,134 @@ def render_provider_section(T: dict) -> None:
         _render_anthropic_key(T)
 
 
+# ─── Upload helpers (shared by inline + sidebar) ──────────────────────────────
+_MAX_ROWS       = 100_000
+_MEMORY_WARN_MB = 400
+
+
+def _make_dataset_summary(df, name: str, T: dict) -> str:
+    """Return a markdown string summarising the newly loaded dataset."""
+    num_cols  = len(df.select_dtypes(include="number").columns)
+    cat_cols  = len(df.select_dtypes(include="object").columns)
+    date_cols = len(df.select_dtypes(include="datetime").columns)
+    missing   = int(df.isnull().sum().sum())
+    miss_str  = (T["ds_missing_ok"] if missing == 0
+                 else T["ds_missing_warn"].format(n=missing))
+    col_list  = ", ".join(f"`{c}`" for c in df.columns[:7])
+    if len(df.columns) > 7:
+        col_list += f" +{len(df.columns) - 7}"
+    return (
+        f"📊 **{name}** נטען!\n\n"
+        f"| | |\n|---|---|\n"
+        f"| **{T['ds_rows']}** | {len(df):,} |\n"
+        f"| **{T['ds_cols']}** | {len(df.columns)} |\n"
+        f"| **{T['ds_numeric']}** | {num_cols} |\n"
+        f"| **{T['ds_categorical']}** | {cat_cols} |\n"
+        f"| **{T['ds_dates']}** | {date_cols} |\n"
+        f"| **נתונים** | {miss_str} |\n\n"
+        f"**עמודות:** {col_list}\n\n"
+        f"{T['ds_prompt']}"
+    )
+
+
+def _init_dataset(df, name: str, file_id, T: dict) -> None:
+    """Shared post-load state initialisation (used by both upload paths)."""
+    tools.set_dataframe(df, name=name)
+    st.session_state.data_loaded        = True
+    st.session_state._uploaded_file_id  = file_id
+    st.session_state.chat               = None
+    st.session_state.dashboard_charts   = []
+    st.session_state.data_warnings      = validate_dataframe(df)
+    # First assistant message = dataset summary card
+    st.session_state.messages = [{
+        "role":          "assistant",
+        "content":       _make_dataset_summary(df, name, T),
+        "charts":        [],
+        "chart_configs": [],
+        "code_snippets": [],
+        "is_system":     True,
+    }]
+
+
+def _handle_uploaded_file(uploaded, T: dict) -> None:
+    """Load a file widget result; skip if already processed."""
+    file_id = f"{uploaded.name}_{uploaded.size}"
+    if file_id == st.session_state.get("_uploaded_file_id"):
+        return
+    try:
+        df = load_uploaded_file(uploaded)
+        total_rows = len(df)
+        if total_rows > _MAX_ROWS:
+            df = df.sample(_MAX_ROWS, random_state=42).reset_index(drop=True)
+            st.info(T["large_file_notice"].format(n=_MAX_ROWS, total=total_rows))
+        mb = check_df_memory(df)
+        if mb > _MEMORY_WARN_MB:
+            st.warning(T["memory_warn"].format(mb=int(mb)))
+        sensitive = detect_sensitive_columns(df)
+        if sensitive:
+            st.warning(T["bias_warning"].format(cols=", ".join(sensitive)))
+        _init_dataset(df, uploaded.name, file_id, T)
+        _audit("FILE_UPLOAD",
+               f"name={uploaded.name} rows={len(df)} cols={len(df.columns)} mb={mb:.1f}")
+        st.rerun()
+    except Exception as exc:
+        _audit("FILE_UPLOAD_ERROR", str(exc))
+        st.error(str(exc))
+
+
+def _handle_demo_data(T: dict) -> None:
+    """Load sample data and initialise session."""
+    df = make_sample_df()
+    _init_dataset(df, "sample_sales.csv", "__demo__", T)
+    _audit("DEMO_LOADED", "")
+    st.rerun()
+
+
+def _render_inline_upload(T: dict) -> None:
+    """Full-page upload prompt shown inside the chat tab when no data is loaded."""
+    st.markdown(
+        f'<div class="upload-zone">'
+        f'<h2>{T["upload_inline_title"]}</h2>'
+        f'<p>{T["upload_inline_sub"]}</p>'
+        f'</div>',
+        unsafe_allow_html=True,
+    )
+    uploaded = st.file_uploader(
+        T["upload_label"],
+        type=["csv", "tsv", "xlsx", "xls", "json", "parquet"],
+        label_visibility="collapsed",
+        help=T["upload_help"],
+        key="inline_uploader",
+    )
+    if uploaded:
+        _handle_uploaded_file(uploaded, T)
+
+    st.markdown(
+        f'<div class="upload-divider">{T["upload_inline_or"]}</div>',
+        unsafe_allow_html=True,
+    )
+    if st.button(T["upload_inline_demo"], use_container_width=False,
+                 key="demo_btn_inline"):
+        _handle_demo_data(T)
+
+
+def _render_quick_chips(T: dict) -> None:
+    """Row of quick-question chip buttons shown after the last AI reply."""
+    qs = T.get("quick_qs", [])[:5]
+    if not qs:
+        return
+    st.markdown(
+        f'<div class="chips-label">{T["quick_chips_lbl"]}</div>',
+        unsafe_allow_html=True,
+    )
+    cols = st.columns(len(qs))
+    for i, q in enumerate(qs):
+        with cols[i]:
+            if st.button(q, key=f"chip_q_{i}", use_container_width=True):
+                st.session_state.pending_input = q
+                st.rerun()
+
+
 # ─── Sidebar ──────────────────────────────────────────────────────────────────
 def render_sidebar(T: dict) -> None:
     with st.sidebar:
@@ -1626,102 +1846,22 @@ def render_sidebar(T: dict) -> None:
 
         st.markdown("---")
 
-        # ── File upload ────────────────────────────────────────────────────
-        st.markdown(f'<div class="sidebar-label">{T["upload_header"]}</div>',
-                    unsafe_allow_html=True)
-        uploaded = st.file_uploader(
-            T["upload_label"],
-            type=["csv","tsv","xlsx","xls","json","parquet"],
-            label_visibility="collapsed",
-            help=T["upload_help"],
-        )
-        _MAX_ROWS = 100_000
-        if uploaded:
-            file_id = f"{uploaded.name}_{uploaded.size}"
-            if file_id != st.session_state.get("_uploaded_file_id"):
-                try:
-                    df = load_uploaded_file(uploaded)
-                    _total_rows = len(df)
-                    # ── Large file sampling ────────────────────────────────
-                    if _total_rows > _MAX_ROWS:
-                        df = df.sample(_MAX_ROWS, random_state=42).reset_index(drop=True)
-                        st.info(T["large_file_notice"].format(n=_MAX_ROWS, total=_total_rows))
-                    # ── Memory check (SRE) ────────────────────────────────
-                    _mb = check_df_memory(df)
-                    if _mb > _MEMORY_WARN_MB:
-                        st.warning(T["memory_warn"].format(mb=int(_mb)))
-                    # ── Bias / sensitive-column detection (Ethics) ────────
-                    _sensitive = detect_sensitive_columns(df)
-                    if _sensitive:
-                        st.warning(T["bias_warning"].format(cols=", ".join(_sensitive)))
-                    tools.set_dataframe(df, name=uploaded.name)
-                    st.session_state.data_loaded = True
-                    st.session_state._uploaded_file_id = file_id
-                    st.session_state.chat = None
-                    st.session_state.messages = []
-                    st.session_state.dashboard_charts = []
-                    st.session_state.data_warnings = validate_dataframe(df)
-                    _audit("FILE_UPLOAD", f"name={uploaded.name} rows={len(df)} cols={len(df.columns)} mb={_mb:.1f}")
-                    st.success(f"✅ {uploaded.name}")
-                except Exception as e:
-                    _audit("FILE_UPLOAD_ERROR", str(e))
-                    st.error(str(e))
-
-        # ── Demo button ────────────────────────────────────────────────────
-        if st.button(T["demo_btn"], use_container_width=True):
-            df = make_sample_df()
-            tools.set_dataframe(df, name="sample_sales.csv")
-            st.session_state.data_loaded = True
-            st.session_state.chat = None   # rebuilt lazily in main()
-            st.session_state._uploaded_file_id = None
-            st.session_state.messages = []
-            st.session_state.dashboard_charts = []
-            st.session_state.data_warnings = validate_dataframe(df)
-            st.success(T["demo_loaded"])
-
-        st.markdown("---")
-
-        # ── Dataset info ───────────────────────────────────────────────────
+        # ── Dataset badge (compact, read-only) ────────────────────────────
         df = tools.get_dataframe()
         if df is not None:
-            st.markdown(f'<div class="sidebar-label">{T["data_header"]}</div>',
-                        unsafe_allow_html=True)
-            st.markdown(f"""
-<div class="metric-row">
-  <div class="metric-card">
-    <div class="metric-value">{len(df):,}</div>
-    <div class="metric-label">{T["rows"]}</div>
-  </div>
-  <div class="metric-card">
-    <div class="metric-value">{len(df.columns)}</div>
-    <div class="metric-label">{T["cols"]}</div>
-  </div>
-</div>""", unsafe_allow_html=True)
-
-            # Column types summary
-            dtype_counts = df.dtypes.astype(str).value_counts()
-            type_str = " · ".join(f"{v}× {k}" for k, v in dtype_counts.items())
-            st.caption(type_str)
-
-            with st.expander(T["columns_expander"]):
+            name = tools.get_data_name() or "dataset"
+            st.markdown(
+                f'<div class="api-badge-ok">📊 {name} · '
+                f'{len(df):,} {T["ds_rows"]} · {len(df.columns)} {T["ds_cols"]}</div>',
+                unsafe_allow_html=True,
+            )
+            with st.expander(T["columns_expander"], expanded=False):
                 for col in df.columns:
                     dtype = str(df[col].dtype)
                     null_pct = df[col].isna().mean() * 100
                     null_str = f" ⚠️{null_pct:.0f}%" if null_pct > 0 else ""
                     st.caption(f"`{col}` — {dtype}{null_str}")
-
             st.markdown("---")
-
-        else:
-            st.info(T["no_data_warn"])
-
-        # ── Quick questions ────────────────────────────────────────────────
-        if df is not None:
-            st.markdown(f'<div class="sidebar-label">{T["quick_header"]}</div>',
-                        unsafe_allow_html=True)
-            for q in T["quick_qs"]:
-                if st.button(q, key=f"quick_{q}", use_container_width=True):
-                    st.session_state.pending_input = q
 
         st.markdown("---")
 
@@ -1840,7 +1980,15 @@ def render_sidebar(T: dict) -> None:
 # ─── Chat History ─────────────────────────────────────────────────────────────
 def render_history() -> None:
     T = TEXT[st.session_state.lang]
-    for msg_idx, msg in enumerate(st.session_state.messages):
+    msgs = st.session_state.messages
+    # Index of the last real assistant message (not is_system, not user)
+    last_asst_idx = max(
+        (i for i, m in enumerate(msgs)
+         if m["role"] == "assistant" and not m.get("is_system")),
+        default=-1,
+    )
+
+    for msg_idx, msg in enumerate(msgs):
         with st.chat_message(msg["role"]):
             st.markdown(msg["content"])
 
@@ -1850,7 +1998,6 @@ def render_history() -> None:
                 p = Path(chart_path)
                 if p.exists():
                     st.image(str(p), use_container_width=True)
-                    # "Add to Dashboard" button for each chart
                     btn_key = f"add_dash_{msg_idx}_{ci}"
                     if st.button(
                         T["add_to_dash_from_chat"],
@@ -1862,7 +2009,6 @@ def render_history() -> None:
                         if cfg:
                             st.session_state.dashboard_charts.append(cfg)
                         else:
-                            # Fallback: static image entry
                             st.session_state.dashboard_charts.append({
                                 "type": "image",
                                 "path": str(p),
@@ -1870,10 +2016,14 @@ def render_history() -> None:
                             })
                         st.toast(T["chart_added_from_chat"])
 
-            # ── Code snippets (collapsible, with built-in copy button) ───
-            for si, snippet in enumerate(msg.get("code_snippets", [])):
+            # ── Code snippets ─────────────────────────────────────────────
+            for snippet in msg.get("code_snippets", []):
                 with st.expander(T["show_code"], expanded=False):
                     st.code(snippet, language="python")
+
+        # ── Quick-question chips (after the last real AI reply) ───────────
+        if msg_idx == last_asst_idx:
+            _render_quick_chips(T)
 
 
 # ─── Main ──────────────────────────────────────────────────────────────────────
@@ -1935,26 +2085,18 @@ def main() -> None:
         unsafe_allow_html=True,
     )
 
-    # ── Tabs ──────────────────────────────────────────────────────────────
-    tab_chat, tab_charts, tab_dashboard, tab_data = st.tabs([
-        T["tab_chat"], T["tab_charts"], T["tab_dashboard"], T["tab_data"],
-    ])
+    # ── 2 Tabs ────────────────────────────────────────────────────────────
+    tab_chat, tab_dashboard = st.tabs([T["tab_chat"], T["tab_dashboard"]])
 
     # ═══════════════════════════════════════════════════════════════════════
     # Tab 1 – AI Chat
     # ═══════════════════════════════════════════════════════════════════════
     with tab_chat:
-        if not st.session_state.messages:
-            st.markdown(f"""
-<div class="welcome-card">
-
-{T["welcome"]}
-
-</div>""", unsafe_allow_html=True)
-            if st.session_state.data_loaded:
-                st.info(T["onboarding_hint"])
+        if not st.session_state.data_loaded:
+            # ── STEP 0: no data yet → show inline upload ──────────────────
+            _render_inline_upload(T)
         else:
-            # ── Chat history (top of tab, scrolls naturally) ──────────────
+            # ── STEP 1+: data loaded → show conversation ──────────────────
             render_history()
 
             # ── Export expander (below history, out of the way) ───────────
@@ -2092,237 +2234,195 @@ def main() -> None:
             st.warning(T["no_data_warn"])
 
     # ═══════════════════════════════════════════════════════════════════════
-    # Tab 2 – Chart Builder
-    # ═══════════════════════════════════════════════════════════════════════
-    with tab_charts:
-        df_now = tools.get_dataframe()
-        if df_now is None:
-            st.info(T["no_data_warn"])
-        else:
-            num_c = df_now.select_dtypes(include="number").columns.tolist()
-
-            col_a, col_b, col_c = st.columns(3)
-            with col_a:
-                chart_type_sel = st.selectbox(T["chart_type"], CHART_TYPES, key="cb_type")
-            with col_b:
-                x_col_sel = st.selectbox(T["chart_x"], df_now.columns.tolist(), key="cb_x")
-            with col_c:
-                y_col_sel = st.selectbox(T["chart_y"], ["—"] + num_c, key="cb_y")
-
-            col_d, col_e, col_f = st.columns(3)
-            with col_d:
-                color_sel = st.selectbox(T["chart_color_by"], ["—"] + df_now.columns.tolist(), key="cb_color")
-                chart_color = None if color_sel == "—" else color_sel
-            with col_e:
-                palette_sel = st.selectbox(T["chart_palette"], list(COLOR_PALETTES.keys()), key="cb_palette")
-            with col_f:
-                chart_title_inp = st.text_input(
-                    T["chart_title_lbl"], placeholder=T["chart_title_ph"], key="cb_title"
-                )
-
-            # Correlation method — only for Heatmap
-            corr_method_val = "pearson"
-            if chart_type_sel == "Heatmap":
-                corr_method_val = st.selectbox(
-                    T["chart_corr_method"],
-                    ["pearson", "spearman", "kendall"],
-                    format_func=lambda x: {
-                        "pearson": "פירסון (Pearson)",
-                        "spearman": "ספירמן (Spearman)",
-                        "kendall": "קנדל (Kendall)",
-                    }[x],
-                    key="cb_corr",
-                )
-
-            max_sample    = max(50, min(5_000, len(df_now)))
-            chart_sample  = st.slider(
-                T["chart_sample_lbl"],
-                min_value=50, max_value=max_sample,
-                value=min(500, max_sample), step=50,
-                key="cb_sample",
-            )
-
-            cfg = {
-                "type":        chart_type_sel,
-                "x":           x_col_sel,
-                "y":           y_col_sel,
-                "color":       chart_color,
-                "palette":     palette_sel,
-                "title":       chart_title_inp,
-                "corr_method": corr_method_val,
-            }
-
-            try:
-                fig = build_chart(cfg, df_now, sample_size=chart_sample)
-                st.plotly_chart(fig, use_container_width=True, key="chart_preview")
-            except Exception as e:
-                st.error(f"שגיאה ביצירת גרף: {e}")
-
-            # Sample-size caption (not shown for chart types that use the full df)
-            if chart_type_sel not in ("Heatmap", "עוגה / Pie", "היסטוגרמה / Histogram",
-                                      "Box Plot"):
-                st.caption(T["chart_sample_note"].format(n=chart_sample, total=len(df_now)))
-
-            if st.button(T["add_to_dash"], key="add_to_dashboard"):
-                cfg_to_save = {**cfg, "sample_size": chart_sample}
-                st.session_state.dashboard_charts.append(cfg_to_save)
-                n_charts = len(st.session_state.dashboard_charts)
-                st.success(f'{T["chart_added"]} {T["chart_added_total"].format(n=n_charts)}')
-
-    # ═══════════════════════════════════════════════════════════════════════
-    # Tab 3 – Dashboard
+    # Tab 2 – Dashboard  (chart builder + charts grid + data view)
     # ═══════════════════════════════════════════════════════════════════════
     with tab_dashboard:
         df_now = tools.get_dataframe()
         if df_now is None:
             st.info(T["no_data_warn"])
-        elif not st.session_state.dashboard_charts:
-            st.info(T["no_charts_hint"])
         else:
-            hdr1, hdr2, hdr3, hdr4 = st.columns([3, 1, 1, 1])
-            with hdr1:
-                st.markdown(
-                    f"**{len(st.session_state.dashboard_charts)} {T['dash_charts_count']}**"
+            # ── Chart Builder (collapsible) ────────────────────────────────
+            with st.expander(T["chart_builder_hdr"], expanded=False):
+                num_c = df_now.select_dtypes(include="number").columns.tolist()
+                col_a, col_b, col_c = st.columns(3)
+                with col_a:
+                    chart_type_sel = st.selectbox(T["chart_type"], CHART_TYPES, key="cb_type")
+                with col_b:
+                    x_col_sel = st.selectbox(T["chart_x"], df_now.columns.tolist(), key="cb_x")
+                with col_c:
+                    y_col_sel = st.selectbox(T["chart_y"], ["—"] + num_c, key="cb_y")
+                col_d, col_e, col_f = st.columns(3)
+                with col_d:
+                    color_sel = st.selectbox(T["chart_color_by"], ["—"] + df_now.columns.tolist(), key="cb_color")
+                    chart_color = None if color_sel == "—" else color_sel
+                with col_e:
+                    palette_sel = st.selectbox(T["chart_palette"], list(COLOR_PALETTES.keys()), key="cb_palette")
+                with col_f:
+                    chart_title_inp = st.text_input(
+                        T["chart_title_lbl"], placeholder=T["chart_title_ph"], key="cb_title"
+                    )
+                corr_method_val = "pearson"
+                if chart_type_sel == "Heatmap":
+                    corr_method_val = st.selectbox(
+                        T["chart_corr_method"],
+                        ["pearson", "spearman", "kendall"],
+                        format_func=lambda x: {
+                            "pearson": "פירסון (Pearson)",
+                            "spearman": "ספירמן (Spearman)",
+                            "kendall": "קנדל (Kendall)",
+                        }[x],
+                        key="cb_corr",
+                    )
+                max_sample   = max(50, min(5_000, len(df_now)))
+                chart_sample = st.slider(
+                    T["chart_sample_lbl"],
+                    min_value=50, max_value=max_sample,
+                    value=min(500, max_sample), step=50,
+                    key="cb_sample",
                 )
-            with hdr2:
-                grid_cols = st.radio(
-                    T["dash_layout"], [1, 2, 3], horizontal=True, index=1,
-                    format_func=lambda x: f"{x} {T['dash_col_suffix']}",
-                    key="dash_grid",
-                )
-            with hdr3:
-                if st.button(T["dash_clear"], use_container_width=True, key="dash_clear_btn"):
-                    st.session_state.dashboard_charts = []
-                    st.rerun()
-            with hdr4:
-                _dash_html = export_dashboard_html(
-                    st.session_state.dashboard_charts, df_now, T["page_title"]
-                )
-                st.download_button(
-                    T["export_dashboard"],
-                    data=_dash_html.encode("utf-8"),
-                    file_name="dashboard.html",
-                    mime="text/html",
-                    help=T["export_dashboard_help"],
-                    use_container_width=True,
-                    key="export_dash_btn",
-                )
+                cfg = {
+                    "type":        chart_type_sel,
+                    "x":           x_col_sel,
+                    "y":           y_col_sel,
+                    "color":       chart_color,
+                    "palette":     palette_sel,
+                    "title":       chart_title_inp,
+                    "corr_method": corr_method_val,
+                }
+                try:
+                    fig = build_chart(cfg, df_now, sample_size=chart_sample)
+                    st.plotly_chart(fig, use_container_width=True, key="chart_preview")
+                except Exception as e:
+                    st.error(f"שגיאה ביצירת גרף: {e}")
+                if chart_type_sel not in ("Heatmap", "עוגה / Pie",
+                                          "היסטוגרמה / Histogram", "Box Plot"):
+                    st.caption(T["chart_sample_note"].format(n=chart_sample, total=len(df_now)))
+                if st.button(T["add_to_dash"], key="add_to_dashboard"):
+                    cfg_to_save = {**cfg, "sample_size": chart_sample}
+                    st.session_state.dashboard_charts.append(cfg_to_save)
+                    n = len(st.session_state.dashboard_charts)
+                    st.success(f'{T["chart_added"]} {T["chart_added_total"].format(n=n)}')
 
             st.markdown("---")
 
-            charts_list = st.session_state.dashboard_charts
-            i = 0
-            while i < len(charts_list):
-                cols = st.columns(grid_cols)
-                for j in range(grid_cols):
-                    idx = i + j
-                    if idx < len(charts_list):
-                        c = charts_list[idx]
-                        with cols[j]:
-                            lbl = c.get("title") or f"{c.get('type','גרף')} – {c.get('x','')}"
-                            st.markdown(f"**{lbl}**")
-                            # ── Static image (from AI chat) ──────────────
-                            if c.get("type") == "image":
-                                img_p = Path(c.get("path", ""))
-                                if img_p.exists():
-                                    st.image(str(img_p), use_container_width=True)
-                                else:
-                                    st.warning("תמונה לא נמצאה")
-                            # ── Plotly chart (from chart builder) ────────
-                            else:
-                                try:
-                                    fig = build_chart(
-                                        c, df_now,
-                                        sample_size=c.get("sample_size", 500),
-                                    )
-                                    st.plotly_chart(
-                                        fig, use_container_width=True,
-                                        key=f"dash_{idx}",
-                                    )
-                                except Exception as e:
-                                    st.error(f"שגיאה: {e}")
-                            if st.button(T["dash_remove"], key=f"rm_dash_{idx}",
-                                         use_container_width=True):
-                                st.session_state.dashboard_charts.pop(idx)
-                                st.rerun()
-                i += grid_cols
-
-    # ═══════════════════════════════════════════════════════════════════════
-    # Tab 4 – Data View
-    # ═══════════════════════════════════════════════════════════════════════
-    with tab_data:
-        df_now = tools.get_dataframe()
-        if df_now is None:
-            st.info(T["no_data_warn"])
-        else:
-            st.markdown(f"### {T['data_title']}")
-
-            # ── Data-quality warnings ──────────────────────────────────
-            if st.session_state.data_warnings:
-                with st.expander(
-                    f"⚠️ {len(st.session_state.data_warnings)} {T['data_warnings_hdr']}",
-                    expanded=True,
-                ):
-                    for w in st.session_state.data_warnings:
-                        st.warning(w)
-                    if st.button(T["data_autofix_btn"], key="auto_fix_data"):
-                        fixed = auto_fix_dataframe(df_now)
-                        tools.set_dataframe(fixed, name=tools.get_data_name())
-                        st.session_state.data_warnings = []
-                        st.success(T["data_fixed"])
-                        st.rerun()
-
-            # ── Search & filter ───────────────────────────────────────
-            col1, col2 = st.columns(2)
-            with col1:
-                search = st.text_input(
-                    T["data_search"], placeholder=T["data_search_ph"], key="data_search_input"
-                )
-            with col2:
-                filter_col = st.selectbox(
-                    T["data_filter_col"],
-                    [T["data_filter_all"]] + df_now.columns.tolist(),
-                    key="data_filter_col_sel",
-                )
-
-            display_df = df_now.copy()
-            if search:
-                if filter_col != T["data_filter_all"] and filter_col in display_df.columns:
-                    mask = (
-                        display_df[filter_col]
-                        .astype(str)
-                        .str.contains(search, case=False, na=False)
+            # ── Dashboard grid ─────────────────────────────────────────────
+            if not st.session_state.dashboard_charts:
+                st.info(T["no_charts_hint"])
+            else:
+                hdr1, hdr2, hdr3, hdr4 = st.columns([3, 1, 1, 1])
+                with hdr1:
+                    st.markdown(
+                        f"**{len(st.session_state.dashboard_charts)} {T['dash_charts_count']}**"
                     )
-                else:
-                    mask = display_df.astype(str).apply(
-                        lambda col: col.str.contains(search, case=False, na=False)
-                    ).any(axis=1)
-                display_df = display_df[mask]
+                with hdr2:
+                    grid_cols = st.radio(
+                        T["dash_layout"], [1, 2, 3], horizontal=True, index=1,
+                        format_func=lambda x: f"{x} {T['dash_col_suffix']}",
+                        key="dash_grid",
+                    )
+                with hdr3:
+                    if st.button(T["dash_clear"], use_container_width=True, key="dash_clear_btn"):
+                        st.session_state.dashboard_charts = []
+                        st.rerun()
+                with hdr4:
+                    _dash_html = export_dashboard_html(
+                        st.session_state.dashboard_charts, df_now, T["page_title"]
+                    )
+                    st.download_button(
+                        T["export_dashboard"],
+                        data=_dash_html.encode("utf-8"),
+                        file_name="dashboard.html",
+                        mime="text/html",
+                        help=T["export_dashboard_help"],
+                        use_container_width=True,
+                        key="export_dash_btn",
+                    )
+                st.markdown("---")
+                charts_list = st.session_state.dashboard_charts
+                i = 0
+                while i < len(charts_list):
+                    cols = st.columns(grid_cols)
+                    for j in range(grid_cols):
+                        idx = i + j
+                        if idx < len(charts_list):
+                            c = charts_list[idx]
+                            with cols[j]:
+                                lbl = c.get("title") or f"{c.get('type','גרף')} – {c.get('x','')}"
+                                st.markdown(f"**{lbl}**")
+                                if c.get("type") == "image":
+                                    img_p = Path(c.get("path", ""))
+                                    if img_p.exists():
+                                        st.image(str(img_p), use_container_width=True)
+                                    else:
+                                        st.warning("תמונה לא נמצאה")
+                                else:
+                                    try:
+                                        fig = build_chart(c, df_now, sample_size=c.get("sample_size", 500))
+                                        st.plotly_chart(fig, use_container_width=True, key=f"dash_{idx}")
+                                    except Exception as e:
+                                        st.error(f"שגיאה: {e}")
+                                if st.button(T["dash_remove"], key=f"rm_dash_{idx}", use_container_width=True):
+                                    st.session_state.dashboard_charts.pop(idx)
+                                    st.rerun()
+                    i += grid_cols
 
-            st.dataframe(display_df, use_container_width=True, height=420)
+            st.markdown("---")
 
-            cap_col, dl_col = st.columns([4, 1])
-            with cap_col:
-                st.caption(T["data_showing"].format(n=len(display_df), total=len(df_now)))
-            with dl_col:
-                csv_bytes = display_df.to_csv(index=False).encode("utf-8-sig")
-                st.download_button(
-                    label=T["export_csv"],
-                    data=csv_bytes,
-                    file_name=f"{tools.get_data_name() or 'data'}.csv",
-                    mime="text/csv",
-                    help=T["export_csv_help"],
-                    use_container_width=True,
-                )
-
-            # ── Detailed stats ────────────────────────────────────────
-            if st.checkbox(T["data_stats_chk"], key="data_stats_cb"):
-                num_only = df_now.select_dtypes(include="number")
-                if not num_only.empty:
-                    st.dataframe(num_only.describe().round(2), use_container_width=True)
-                else:
-                    st.info(T["no_numeric_cols"])
-
+            # ── Data View (collapsible) ────────────────────────────────────
+            with st.expander(T["data_view_hdr"], expanded=False):
+                if st.session_state.data_warnings:
+                    with st.expander(
+                        f"⚠️ {len(st.session_state.data_warnings)} {T['data_warnings_hdr']}",
+                        expanded=True,
+                    ):
+                        for w in st.session_state.data_warnings:
+                            st.warning(w)
+                        if st.button(T["data_autofix_btn"], key="auto_fix_data"):
+                            fixed = auto_fix_dataframe(df_now)
+                            tools.set_dataframe(fixed, name=tools.get_data_name())
+                            st.session_state.data_warnings = []
+                            st.success(T["data_fixed"])
+                            st.rerun()
+                col1, col2 = st.columns(2)
+                with col1:
+                    search = st.text_input(
+                        T["data_search"], placeholder=T["data_search_ph"], key="data_search_input"
+                    )
+                with col2:
+                    filter_col = st.selectbox(
+                        T["data_filter_col"],
+                        [T["data_filter_all"]] + df_now.columns.tolist(),
+                        key="data_filter_col_sel",
+                    )
+                display_df = df_now.copy()
+                if search:
+                    if filter_col != T["data_filter_all"] and filter_col in display_df.columns:
+                        mask = display_df[filter_col].astype(str).str.contains(search, case=False, na=False)
+                    else:
+                        mask = display_df.astype(str).apply(
+                            lambda col: col.str.contains(search, case=False, na=False)
+                        ).any(axis=1)
+                    display_df = display_df[mask]
+                st.dataframe(display_df, use_container_width=True, height=400)
+                cap_col, dl_col = st.columns([4, 1])
+                with cap_col:
+                    st.caption(T["data_showing"].format(n=len(display_df), total=len(df_now)))
+                with dl_col:
+                    csv_bytes = display_df.to_csv(index=False).encode("utf-8-sig")
+                    st.download_button(
+                        label=T["export_csv"],
+                        data=csv_bytes,
+                        file_name=f"{tools.get_data_name() or 'data'}.csv",
+                        mime="text/csv",
+                        help=T["export_csv_help"],
+                        use_container_width=True,
+                    )
+                if st.checkbox(T["data_stats_chk"], key="data_stats_cb"):
+                    num_only = df_now.select_dtypes(include="number")
+                    if not num_only.empty:
+                        st.dataframe(num_only.describe().round(2), use_container_width=True)
+                    else:
+                        st.info(T["no_numeric_cols"])
 
 if __name__ == "__main__":
     main()
