@@ -140,6 +140,12 @@ TEXT = {
         "export_ai_charts_help": "הורד את כל גרפי ה-AI שנוצרו בשיחה",
         "export_pdf":            "📑 ייצא שיחה (PDF)",
         "export_pdf_help":       "הורד את השיחה כקובץ PDF עם גרפים",
+        # קבצים גדולים / אבטחה / onboarding
+        "large_file_notice":     "ℹ️ הקובץ גדול — מוצג מדגם של {n:,} שורות מתוך {total:,}",
+        "rate_limit_warn":       "⚠️ {n}/{limit} שאלות בסשן זה",
+        "rate_limit_block":      "🚫 הגעת למגבלת {limit} שאלות בסשן. רענן את הדף להמשך.",
+        "input_too_long":        "⚠️ השאלה קוצרה ל-{max} תווים",
+        "onboarding_hint":       "💡 **איך להתחיל?** העלה קובץ ← שאל שאלה ב-AI Chat ← בנה גרפים ← הוסף לדשבורד",
         # Email
         "email_hdr":             "📧 שלח במייל",
         "email_from":            "כתובת שולח (Gmail)",
@@ -269,6 +275,12 @@ TEXT = {
         "export_ai_charts_help": "Download all AI-generated charts from this conversation",
         "export_pdf":            "📑 Export Chat (PDF)",
         "export_pdf_help":       "Download the conversation as a PDF with charts",
+        # Large files / security / onboarding
+        "large_file_notice":     "ℹ️ Large file — showing a sample of {n:,} of {total:,} rows",
+        "rate_limit_warn":       "⚠️ {n}/{limit} questions used this session",
+        "rate_limit_block":      "🚫 You have reached the {limit}-question session limit. Refresh to continue.",
+        "input_too_long":        "⚠️ Question trimmed to {max} characters",
+        "onboarding_hint":       "💡 **Getting started:** Upload a file ← Ask in AI Chat ← Build Charts ← Add to Dashboard",
         # Email
         "email_hdr":             "📧 Send by Email",
         "email_from":            "From address (Gmail)",
@@ -319,6 +331,7 @@ Respond in the same language the user writes in (Hebrew or English).
 
 # ─── Ollama Helper ────────────────────────────────────────────────────────────
 
+@st.cache_data(ttl=30, show_spinner=False)
 def get_ollama_models() -> tuple:
     """Query local Ollama for available models. Returns (available: bool, model_names: list)."""
     try:
@@ -338,6 +351,7 @@ def get_ollama_models() -> tuple:
 
 # ─── Data Validation ──────────────────────────────────────────────────────────
 
+@st.cache_data(show_spinner=False)
 def validate_dataframe(df: pd.DataFrame) -> list:
     """Return list of data-quality warnings (numeric-as-string, unparsed dates)."""
     warnings_list = []
@@ -996,6 +1010,68 @@ body {{
         image-rendering: -webkit-optimize-contrast;
     }}
 }}
+
+/* ═══════════════════════════════════════════════
+   DARK MODE  (respects OS preference)
+═══════════════════════════════════════════════ */
+@media (prefers-color-scheme: dark) {{
+    .app-title {{ color: #e8eaf6; }}
+    .app-sub   {{ color: #9fa8bc; }}
+    .app-header {{ border-bottom-color: #2d2d44; }}
+
+    .sidebar-label {{ color: #9fa8bc; }}
+
+    .metric-card {{
+        background: #1e1e2e;
+        border-color: #2d2d44;
+    }}
+    .metric-value {{ color: #82aaff; }}
+    .metric-label {{ color: #9fa8bc; }}
+
+    .welcome-card {{
+        background: linear-gradient(135deg, #667eea12, #764ba212);
+        border-color: #2d2d44;
+    }}
+
+    .stButton > button {{
+        background: #1e1e2e;
+        color: #c9d1d9;
+        border-color: #30363d;
+    }}
+    .stButton > button:hover {{
+        background: #388bfd;
+        color: white;
+        border-color: #388bfd;
+    }}
+    .stDownloadButton > button {{
+        background: #1c2d4a;
+        color: #79b8ff;
+        border-color: #1f4168;
+    }}
+    .stDownloadButton > button:hover {{
+        background: #388bfd;
+        color: white;
+        border-color: #388bfd;
+    }}
+
+    .tool-call-badge {{
+        background: #1c2d4a;
+        color: #79b8ff;
+    }}
+    .chart-wrap {{ border-color: #2d2d44; }}
+
+    .api-badge-ok {{
+        background: #1a3a2a;
+        color: #56d364;
+        border-color: #2ea043;
+    }}
+    .api-badge-err {{
+        background: #3a1a1a;
+        color: #f85149;
+        border-color: #da3633;
+    }}
+    .api-hint {{ color: #8b949e; }}
+}}
 </style>
 """, unsafe_allow_html=True)
 
@@ -1016,11 +1092,20 @@ def init_state() -> None:
         st.session_state.dashboard_charts = []
     if "data_warnings" not in st.session_state:
         st.session_state.data_warnings = []
-    # API key: prefer env var, otherwise empty (user must supply via UI)
+    # API key: env var → st.secrets → empty (user must supply via UI)
     if "api_key" not in st.session_state:
-        st.session_state.api_key = os.environ.get("ANTHROPIC_API_KEY", "")
+        env_key = os.environ.get("ANTHROPIC_API_KEY", "")
+        try:
+            secrets_key = st.secrets.get("ANTHROPIC_API_KEY", "") if not env_key else ""
+        except Exception:
+            secrets_key = ""
+        st.session_state.api_key = env_key or secrets_key
+        st.session_state.api_key_from_env = bool(env_key or secrets_key)
     if "api_key_from_env" not in st.session_state:
-        st.session_state.api_key_from_env = bool(os.environ.get("ANTHROPIC_API_KEY", ""))
+        st.session_state.api_key_from_env = False
+    # Rate limiting: max N AI calls per session
+    if "_request_count" not in st.session_state:
+        st.session_state._request_count = 0
     # Provider: "anthropic" | "ollama"
     if "provider" not in st.session_state:
         st.session_state.provider = "anthropic"
@@ -1284,11 +1369,16 @@ def render_sidebar(T: dict) -> None:
             label_visibility="collapsed",
             help=T["upload_help"],
         )
+        _MAX_ROWS = 100_000
         if uploaded:
             file_id = f"{uploaded.name}_{uploaded.size}"
             if file_id != st.session_state.get("_uploaded_file_id"):
                 try:
                     df = load_uploaded_file(uploaded)
+                    _total_rows = len(df)
+                    if _total_rows > _MAX_ROWS:
+                        df = df.sample(_MAX_ROWS, random_state=42).reset_index(drop=True)
+                        st.info(T["large_file_notice"].format(n=_MAX_ROWS, total=_total_rows))
                     tools.set_dataframe(df, name=uploaded.name)
                     st.session_state.data_loaded = True
                     st.session_state._uploaded_file_id = file_id
@@ -1513,6 +1603,8 @@ def main() -> None:
 {T["welcome"]}
 
 </div>""", unsafe_allow_html=True)
+            if st.session_state.data_loaded:
+                st.info(T["onboarding_hint"])
         else:
             # ── Export row ────────────────────────────────────────────────
             _has_charts = any(msg.get("charts") for msg in st.session_state.messages)
@@ -1572,7 +1664,26 @@ def main() -> None:
         # Guard: quick-question buttons must also respect disabled state
         final_input = (pre_fill if not (no_key or no_data) else None) or user_input
 
+        _RATE_LIMIT = 30
+        _MAX_INPUT  = 2000
+
         if final_input and st.session_state.chat:
+            # ── Rate limit check ──────────────────────────────────────────
+            if st.session_state._request_count >= _RATE_LIMIT:
+                st.error(T["rate_limit_block"].format(limit=_RATE_LIMIT))
+                final_input = None
+
+        if final_input and st.session_state.chat:
+            # ── Input sanitisation ────────────────────────────────────────
+            if len(final_input) > _MAX_INPUT:
+                st.caption(T["input_too_long"].format(max=_MAX_INPUT))
+                final_input = final_input[:_MAX_INPUT]
+
+            st.session_state._request_count += 1
+            _req_n = st.session_state._request_count
+            if _req_n >= _RATE_LIMIT * 0.8:    # warn at 80 %
+                st.caption(T["rate_limit_warn"].format(n=_req_n, limit=_RATE_LIMIT))
+
             with st.chat_message("user"):
                 st.markdown(final_input)
             st.session_state.messages.append({

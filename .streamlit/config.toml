@@ -1,0 +1,14 @@
+[theme]
+primaryColor     = "#1a73e8"
+backgroundColor  = "#ffffff"
+secondaryBackgroundColor = "#f8f9fc"
+textColor        = "#1a1a2e"
+font             = "sans serif"
+
+[server]
+maxUploadSize = 200        # MB — allow large CSV/Excel files
+enableCORS    = false
+headless      = true       # required for Docker / cloud deployments
+
+[browser]
+gatherUsageStats = false

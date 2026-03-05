@@ -15,8 +15,8 @@ venv/
 env/
 .env
 
-# Streamlit
-.streamlit/
+# Streamlit — only exclude secrets, commit config.toml
+.streamlit/secrets.toml
 
 # Generated charts (runtime artifacts)
 charts/*.png

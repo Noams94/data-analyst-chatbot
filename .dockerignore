@@ -1,0 +1,13 @@
+__pycache__/
+*.py[cod]
+.env
+.env.*
+*.egg-info/
+.git/
+.github/
+.claude/
+tests/
+*.md
+*.log
+.DS_Store
+Thumbs.db

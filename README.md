@@ -1,97 +1,120 @@
 # 🤖 Data Analyst Chatbot
 
-צ'אטבוט ניתוח נתונים חכם — מופעל על ידי Claude AI ו-chatlas
-Bilingual (Hebrew / English) data analysis chatbot powered by Claude AI & chatlas.
+A bilingual (Hebrew / English) AI-powered data analysis tool built with **Streamlit** and **Claude Opus 4.6** (or local **Ollama** models).
+
+Upload a CSV, Excel, JSON, or Parquet file and ask questions in natural language — the bot generates charts, summaries, and interactive dashboards.
 
 ---
 
-## ✨ פיצ'רים | Features
+## Features
 
-| לשונית | תיאור |
+| Feature | Description |
 |---|---|
-| 🤖 **AI Chat** | שאל שאלות בעברית או אנגלית — קבל תובנות, גרפים ו-follow-ups אוטומטיים |
-| 📊 **גרפים** | בנה 8 סוגי גרפים אינטראקטיביים (Plotly) עם פלטות צבע ובקרת מדגם |
-| 📈 **דשבורד** | הוסף גרפים לדשבורד אישי בפריסת 1/2/3 עמודות |
-| 🗂 **נתונים** | חיפוש וסינון, אזהרות איכות נתונים + תיקון אוטומטי, סטטיסטיקות |
-
-### יכולות AI
-- 📊 ניתוח ותשובות מיידיות על הנתונים
-- 📈 יצירת גרפים (matplotlib) ישירות מהשיחה
-- 🔍 גילוי תובנות ומגמות
-- 💡 הצעות לניתוחים המשך
+| 🤖 AI Chat | Ask questions in Hebrew or English; the bot runs pandas analyses and creates charts automatically |
+| 📊 Chart Builder | Interactive Plotly chart builder with 8 chart types and colour palettes |
+| 📈 Dashboard | Collect charts into a customisable multi-column dashboard |
+| 🗂 Data View | Browse, search, filter, and auto-fix data quality issues |
+| 📤 Export | Download conversation as **HTML** or **PDF**, AI charts as **ZIP**, dashboard as interactive **HTML** |
+| 📧 Email | Send the conversation or data CSV via Gmail (App Password) |
+| 🌙 Dark mode | Automatically respects your OS colour-scheme preference |
+| 🦙 Ollama | Run fully offline with a local Ollama model (no API key needed) |
 
 ---
 
-## 🚀 הפעלה מהירה | Quick Start
+## Quick Start
 
-### macOS — לחץ פעמיים
-```bash
-# תן הרשאת הרצה (פעם ראשונה בלבד)
-chmod +x run.command
-# ואז לחץ פעמיים על הקובץ run.command
-```
+### 1 · Local (Python 3.9+)
 
-### Terminal
 ```bash
+git clone https://github.com/Noams94/data-analyst-chatbot.git
+cd data-analyst-chatbot
 pip install -r requirements.txt
 streamlit run app.py
-# פתח http://localhost:8501
+```
+
+Set your Anthropic API key in the sidebar **or** export it as an environment variable:
+
+```bash
+export ANTHROPIC_API_KEY=sk-ant-...
+streamlit run app.py
+```
+
+### 2 · Docker
+
+```bash
+docker compose up --build
+# → http://localhost:8501
+```
+
+Pass your API key via a `.env` file in the project root:
+
+```
+ANTHROPIC_API_KEY=sk-ant-...
 ```
 
 ---
 
-## 🔑 מפתח API
+## Configuration
 
-1. קבל מפתח חינמי בכתובת: [console.anthropic.com](https://console.anthropic.com)
-2. הזן אותו בסרגל הצדדי של האפליקציה (נשמר בזיכרון בלבד)
-3. לחלופין, הגדר משתנה סביבה: `export ANTHROPIC_API_KEY=sk-ant-...`
+| File | Purpose |
+|---|---|
+| `.streamlit/config.toml` | Theme colours, max upload size (200 MB), headless mode |
+| `.streamlit/secrets.toml` | Store `ANTHROPIC_API_KEY` securely (not committed to git) |
+
+**`secrets.toml` example:**
+```toml
+ANTHROPIC_API_KEY = "sk-ant-..."
+```
 
 ---
 
-## 📁 מבנה הפרויקט | Structure
+## Project Structure
 
 ```
 data_analyst_chatbot/
-├── app.py              ← Streamlit UI (bilingual, 4 tabs)
-├── tools.py            ← Analysis tools: pandas, matplotlib charts
-├── requirements.txt    ← Python dependencies
-├── run.command         ← macOS double-click launcher
-└── charts/             ← Generated chart images (git-ignored)
+├── app.py              # Main Streamlit application
+├── tools.py            # Analysis tools: charts, pandas, overview
+├── requirements.txt
+├── Dockerfile
+├── docker-compose.yml
+├── .streamlit/
+│   └── config.toml
+└── tests/
+    └── test_tools.py   # pytest unit tests
 ```
 
 ---
 
-## 📦 תלויות | Dependencies
+## Running Tests
 
-```
-chatlas>=0.15.0     # LLM chat framework
-anthropic>=0.49.0   # Anthropic SDK
-streamlit>=1.40.0   # Web UI
-pandas>=2.0.0       # Data processing
-plotly>=5.0.0       # Interactive charts (dashboard)
-matplotlib>=3.7.0   # AI-generated charts
-seaborn>=0.12.0     # Chart styling
-numpy>=1.24.0       # Numerical computing
-openpyxl>=3.1.0     # Excel support
+```bash
+pip install pytest
+pytest tests/ -v
 ```
 
 ---
 
-## 🔒 אבטחה ופרטיות | Security & Privacy
+## Tech Stack
 
-- מפתח ה-API נשמר **בזיכרון בלבד** — לא נכתב לדיסק
-- הנתונים שלך **לא נשלחים לשרת** — רק סיכום סטטיסטי קצר נשלח ל-API לצורך שאלות AI
-- הקוד בקונסולה רץ **מקומית בלבד** על המחשב שלך
-
----
-
-## 🛠 טכנולוגיות | Tech Stack
-
-- **[chatlas](https://posit-dev.github.io/chatlas/)** — Python LLM framework by Posit
-- **[Claude Opus 4.6](https://anthropic.com)** — Anthropic AI model
-- **[Streamlit](https://streamlit.io)** — Python web app framework
-- **[Plotly](https://plotly.com)** — Interactive visualization
+- **Frontend:** Streamlit
+- **AI:** chatlas + Anthropic Claude Opus 4.6 (or Ollama)
+- **Data:** pandas, numpy
+- **Charts:** matplotlib / seaborn (AI), Plotly (builder & dashboard)
+- **PDF:** fpdf2 + python-bidi (Hebrew RTL support)
+- **Email:** smtplib (stdlib)
 
 ---
 
-*Built with ❤️ using Claude AI*
+## Security Notes
+
+- API keys are stored **in-memory only** (session state) and never written to disk
+- The app password for email is never persisted between sessions
+- User input is capped at **2,000 characters** per message
+- AI requests are rate-limited to **30 per session**
+- Files larger than **100,000 rows** are automatically sampled
+
+---
+
+## License
+
+MIT
