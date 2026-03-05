@@ -131,6 +131,13 @@ TEXT = {
         "chart_seaborn_style":"סגנון רקע",
         "chart_ai_palette":   "פלטת צבעים",
         "chart_figsize":      "גודל גרף",
+        # ייצוא
+        "export_chat":           "📄 ייצא שיחה (HTML)",
+        "export_chat_help":      "הורד את השיחה עם הגרפים כקובץ HTML",
+        "export_dashboard":      "💾 ייצא דשבורד (HTML)",
+        "export_dashboard_help": "הורד את כל הגרפים בדשבורד כ-HTML אינטראקטיבי",
+        "export_ai_charts":      "🖼 הורד גרפי AI (ZIP)",
+        "export_ai_charts_help": "הורד את כל גרפי ה-AI שנוצרו בשיחה",
     },
     "en": {
         "page_title":       "🤖 Data Analyst Chatbot",
@@ -236,6 +243,13 @@ TEXT = {
         "chart_seaborn_style":"Background style",
         "chart_ai_palette":   "Color palette",
         "chart_figsize":      "Figure size",
+        # Export
+        "export_chat":           "📄 Export Conversation (HTML)",
+        "export_chat_help":      "Download the conversation with charts as an HTML file",
+        "export_dashboard":      "💾 Export Dashboard (HTML)",
+        "export_dashboard_help": "Download all dashboard charts as an interactive HTML file",
+        "export_ai_charts":      "🖼 Download AI Charts (ZIP)",
+        "export_ai_charts_help": "Download all AI-generated charts from this conversation",
     },
 }
 
@@ -458,6 +472,102 @@ def build_chart(config: dict, df: pd.DataFrame, sample_size: int = 500) -> go.Fi
         err_fig.add_annotation(text=f"שגיאה ביצירת גרף: {exc}", showarrow=False,
                                font={"color": "#c5221f"})
         return apply_chart_style(err_fig)
+
+
+# ─── Export Helpers ───────────────────────────────────────────────────────────
+
+def export_chat_html(messages: list, title: str = "Chat Export") -> bytes:
+    """Return UTF-8 encoded HTML of the conversation with base64-embedded chart images."""
+    import base64
+    rows = []
+    for msg in messages:
+        is_user = msg["role"] == "user"
+        bg = "#e8f0fe" if is_user else "#f1f8e9"
+        border = "#1a73e8" if is_user else "#2ecc71"
+        label = "👤 User" if is_user else "🤖 Assistant"
+        content = (
+            msg["content"]
+            .replace("&", "&amp;")
+            .replace("<", "&lt;")
+            .replace(">", "&gt;")
+            .replace("\n", "<br>")
+        )
+        rows.append(
+            f'<div style="background:{bg};border-left:4px solid {border};'
+            f'padding:12px 16px;border-radius:8px;margin:10px 0;">'
+            f'<strong style="color:{border}">{label}</strong><br><br>{content}'
+        )
+        for chart_path in msg.get("charts", []):
+            p = Path(chart_path)
+            if p.exists():
+                b64 = base64.b64encode(p.read_bytes()).decode()
+                rows.append(
+                    f'<br><img src="data:image/png;base64,{b64}" '
+                    f'style="max-width:100%;border-radius:8px;margin-top:8px;">'
+                )
+        rows.append("</div>")
+    body = "\n".join(rows) if rows else "<p>No messages.</p>"
+    html = (
+        "<!DOCTYPE html><html><head>"
+        '<meta charset="utf-8">'
+        f"<title>{title}</title>"
+        "<style>"
+        'body{font-family:"Segoe UI",Arial,sans-serif;max-width:860px;margin:40px auto;padding:0 20px;color:#1a1a2e;}'
+        "h1{color:#1a73e8;border-bottom:2px solid #e8eaf0;padding-bottom:8px;}"
+        "</style></head><body>"
+        f"<h1>💬 {title}</h1>"
+        f"{body}"
+        "</body></html>"
+    )
+    return html.encode("utf-8")
+
+
+def export_dashboard_html(charts_configs: list, df: pd.DataFrame,
+                          title: str = "Dashboard") -> str:
+    """Return a standalone HTML string with all dashboard charts (plotly CDN)."""
+    import plotly.io as pio
+    figs_html = []
+    for cfg in charts_configs:
+        try:
+            fig = build_chart(cfg, df, sample_size=cfg.get("sample_size", 500))
+            lbl = cfg.get("title") or f"{cfg.get('type', 'Chart')} – {cfg.get('x', '')}"
+            fig_html = pio.to_html(fig, full_html=False, include_plotlyjs=False)
+            figs_html.append(
+                f'<div style="margin-bottom:2rem">'
+                f'<h3 style="color:#444;border-bottom:1px solid #eee;padding-bottom:4px">{lbl}</h3>'
+                f'{fig_html}</div>'
+            )
+        except Exception as exc:
+            figs_html.append(f'<p style="color:red">Error: {exc}</p>')
+    return (
+        "<!DOCTYPE html><html><head>"
+        '<meta charset="utf-8">'
+        f"<title>{title}</title>"
+        '<script src="https://cdn.plot.ly/plotly-latest.min.js"></script>'
+        "<style>"
+        'body{font-family:"Segoe UI",Arial,sans-serif;max-width:1200px;margin:40px auto;padding:0 20px;}'
+        "h1{color:#1a73e8;}"
+        "</style></head><body>"
+        f"<h1>📈 {title}</h1>"
+        + "".join(figs_html)
+        + "</body></html>"
+    )
+
+
+def export_ai_charts_zip(messages: list) -> bytes:
+    """Return a ZIP archive containing all AI-generated chart PNGs from the conversation."""
+    import zipfile
+    import io as _io
+    buf = _io.BytesIO()
+    with zipfile.ZipFile(buf, "w", zipfile.ZIP_DEFLATED) as zf:
+        seen: set = set()
+        for msg in messages:
+            for chart_path in msg.get("charts", []):
+                p = Path(chart_path)
+                if p.exists() and str(p) not in seen:
+                    zf.write(p, p.name)
+                    seen.add(str(p))
+    return buf.getvalue()
 
 
 # ─── Custom CSS ───────────────────────────────────────────────────────────────
@@ -1079,6 +1189,30 @@ def main() -> None:
 
 </div>""", unsafe_allow_html=True)
         else:
+            # ── Export row ────────────────────────────────────────────────
+            _has_charts = any(msg.get("charts") for msg in st.session_state.messages)
+            _ec1, _ec2, _ = st.columns([1, 1, 4])
+            with _ec1:
+                st.download_button(
+                    T["export_chat"],
+                    data=export_chat_html(st.session_state.messages, T["page_title"]),
+                    file_name="chat_export.html",
+                    mime="text/html",
+                    help=T["export_chat_help"],
+                    use_container_width=True,
+                    key="export_chat_btn",
+                )
+            with _ec2:
+                st.download_button(
+                    T["export_ai_charts"],
+                    data=export_ai_charts_zip(st.session_state.messages),
+                    file_name="ai_charts.zip",
+                    mime="application/zip",
+                    help=T["export_ai_charts_help"],
+                    use_container_width=True,
+                    disabled=not _has_charts,
+                    key="export_charts_btn",
+                )
             render_history()
 
         # Resolve quick-question button presses
@@ -1220,7 +1354,7 @@ def main() -> None:
         elif not st.session_state.dashboard_charts:
             st.info(T["no_charts_hint"])
         else:
-            hdr1, hdr2, hdr3 = st.columns([3, 1, 1])
+            hdr1, hdr2, hdr3, hdr4 = st.columns([3, 1, 1, 1])
             with hdr1:
                 st.markdown(
                     f"**{len(st.session_state.dashboard_charts)} {T['dash_charts_count']}**"
@@ -1235,6 +1369,19 @@ def main() -> None:
                 if st.button(T["dash_clear"], use_container_width=True, key="dash_clear_btn"):
                     st.session_state.dashboard_charts = []
                     st.rerun()
+            with hdr4:
+                _dash_html = export_dashboard_html(
+                    st.session_state.dashboard_charts, df_now, T["page_title"]
+                )
+                st.download_button(
+                    T["export_dashboard"],
+                    data=_dash_html.encode("utf-8"),
+                    file_name="dashboard.html",
+                    mime="text/html",
+                    help=T["export_dashboard_help"],
+                    use_container_width=True,
+                    key="export_dash_btn",
+                )
 
             st.markdown("---")
 
