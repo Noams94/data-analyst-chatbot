@@ -22,9 +22,12 @@ _df: Optional[pd.DataFrame] = None
 _data_name: str = ""
 _pending_charts: list[Path] = []        # Charts waiting to be shown in the UI
 _pending_chart_configs: list[dict] = [] # Config dicts (type, x, y, …) per chart
-_pending_code_snippets: list[str] = []  # Code run via run_analysis / create_chart
+_pending_code_snippets: list[dict] = []  # {"type": "analysis"|"chart", "code": str}
 _charts_dir = Path(__file__).parent / "charts"
 _charts_dir.mkdir(exist_ok=True)
+
+# ─── AI Dashboard State ──────────────────────────────────────────────────────
+_ai_dashboard_charts: list[dict] = []
 
 # ─── Matplotlib Style ─────────────────────────────────────────────────────────
 
@@ -130,8 +133,10 @@ def get_pending_chart_configs() -> list[dict]:
     return configs
 
 
-def get_pending_code_snippets() -> list[str]:
-    """Return code snippets run since the last call, then clear the queue."""
+def get_pending_code_snippets() -> list[dict]:
+    """Return code snippets since the last call, then clear the queue.
+    Each item: {"type": "analysis"|"chart", "code": str}
+    """
     snippets = list(_pending_code_snippets)
     _pending_code_snippets.clear()
     return snippets
@@ -202,7 +207,7 @@ def run_analysis(pandas_code: str) -> str:
     if _df is None:
         return "⚠️ No dataset loaded."
 
-    _pending_code_snippets.append(pandas_code.strip())
+    _pending_code_snippets.append({"type": "analysis", "code": pandas_code.strip()})
     local_ns = {"df": _df.copy(), "pd": pd, "np": np, "json": json}
     try:
         lines = [l for l in pandas_code.strip().splitlines() if l.strip()]
@@ -407,7 +412,7 @@ def create_chart(
             + (f"    top_n={top_n},\n" if top_n else "")
             + ")"
         )
-        _pending_code_snippets.append(_code)
+        _pending_code_snippets.append({"type": "chart", "code": _code})
 
         return f"✅ Chart created: '{title or t}' — displayed below."
 
@@ -454,3 +459,217 @@ def suggest_next_analyses() -> str:
             suggestions.append(f"⚠️ Potential outliers in '{col}': {outliers} rows")
 
     return "\n".join(f"{i+1}. {s}" for i, s in enumerate(suggestions))
+
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# AI Dashboard Builder — tools
+# ═══════════════════════════════════════════════════════════════════════════════
+
+# Chart type normalisation: accept short names and map to full bilingual strings
+_CHART_TYPE_MAP: dict[str, str] = {
+    "bar":       "עמודות / Bar",
+    "Bar":       "עמודות / Bar",
+    "עמודות":    "עמודות / Bar",
+    "line":      "קו / Line",
+    "Line":      "קו / Line",
+    "קו":        "קו / Line",
+    "area":      "שטח / Area",
+    "Area":      "שטח / Area",
+    "שטח":       "שטח / Area",
+    "pie":       "עוגה / Pie",
+    "Pie":       "עוגה / Pie",
+    "עוגה":      "עוגה / Pie",
+    "histogram": "היסטוגרמה / Histogram",
+    "Histogram": "היסטוגרמה / Histogram",
+    "hist":      "היסטוגרמה / Histogram",
+    "היסטוגרמה": "היסטוגרמה / Histogram",
+    "scatter":   "פיזור / Scatter",
+    "Scatter":   "פיזור / Scatter",
+    "פיזור":     "פיזור / Scatter",
+    "box":       "Box Plot",
+    "box plot":  "Box Plot",
+    "heatmap":   "Heatmap",
+}
+
+_VALID_CHART_TYPES = {
+    "עמודות / Bar", "קו / Line", "שטח / Area", "עוגה / Pie",
+    "היסטוגרמה / Histogram", "פיזור / Scatter", "Box Plot", "Heatmap",
+}
+
+# Palette normalisation: accept English-only names
+_PALETTE_MAP: dict[str, str] = {
+    "Blue":   "כחול / Blue",
+    "blue":   "כחול / Blue",
+    "Purple": "סגול / Purple",
+    "purple": "סגול / Purple",
+    "Green":  "ירוק / Green",
+    "green":  "ירוק / Green",
+    "Orange": "כתום / Orange",
+    "orange": "כתום / Orange",
+    "Pink":   "ורוד / Pink",
+    "pink":   "ורוד / Pink",
+    "Teal":   "ציאן / Teal",
+    "teal":   "ציאן / Teal",
+}
+
+
+def _normalise_chart_type(t: str) -> str:
+    """Map common abbreviations to the full bilingual chart-type string."""
+    if t in _VALID_CHART_TYPES:
+        return t
+    return _CHART_TYPE_MAP.get(t, _CHART_TYPE_MAP.get(t.lower().strip(), t))
+
+
+def _normalise_palette(p: str) -> str:
+    """Map English-only palette name to the internal bilingual key."""
+    return _PALETTE_MAP.get(p, p)
+
+
+def _validate_chart_config(cfg: dict) -> Optional[str]:
+    """Return an error string if cfg references invalid columns, else None."""
+    if _df is None:
+        return "No dataset loaded"
+    valid_cols = set(_df.columns.tolist())
+    x = cfg.get("x", "")
+    y = cfg.get("y", "—")
+    color = cfg.get("color")
+    if x and x not in valid_cols:
+        return f"x column '{x}' not found in dataset"
+    if y and y != "—" and y not in valid_cols:
+        return f"y column '{y}' not found in dataset"
+    if color and color not in valid_cols:
+        return f"color column '{color}' not found in dataset"
+    return None
+
+
+def _apply_chart_defaults(cfg: dict) -> dict:
+    """Fill in missing optional fields with sensible defaults."""
+    cfg.setdefault("palette", "כחול / Blue")
+    cfg.setdefault("sample_size", 500)
+    cfg.setdefault("color", None)
+    cfg.setdefault("y", "—")
+    cfg.setdefault("corr_method", "pearson")
+    if "type" in cfg:
+        cfg["type"] = _normalise_chart_type(cfg["type"])
+    if "palette" in cfg:
+        cfg["palette"] = _normalise_palette(cfg["palette"])
+    return cfg
+
+
+def get_ai_dashboard_charts() -> list[dict]:
+    """Return the current AI dashboard chart configs."""
+    return list(_ai_dashboard_charts)
+
+
+def clear_ai_dashboard_charts() -> None:
+    """Clear all AI dashboard charts."""
+    _ai_dashboard_charts.clear()
+
+
+def set_dashboard_charts(charts: list[dict]) -> str:
+    """
+    Replace the entire AI dashboard with the given list of chart configurations.
+    Use this for initial dashboard creation or full rebuilds.
+
+    charts: list of dicts, each with keys:
+        type (str): Chart type — one of "עמודות / Bar", "קו / Line", "שטח / Area",
+                    "עוגה / Pie", "היסטוגרמה / Histogram", "פיזור / Scatter",
+                    "Box Plot", "Heatmap". Short names like "bar", "line" are also accepted.
+        x (str): Column name for X-axis
+        y (str): Column name for Y-axis (numeric), or "—" if not needed
+        title (str): Descriptive chart title in the user's language
+        color (str, optional): Column name for color grouping
+        palette (str, optional): Color palette — "כחול / Blue", "סגול / Purple",
+                 "ירוק / Green", "כתום / Orange", "ורוד / Pink", "ציאן / Teal"
+        corr_method (str, optional): For Heatmap only — "pearson", "spearman", or "kendall"
+        sample_size (int, optional): Number of rows to plot (default 500)
+
+    Returns a confirmation message.
+    """
+    global _ai_dashboard_charts
+    if _df is None:
+        return "⚠️ No dataset loaded."
+
+    errors: list[str] = []
+    for i, cfg in enumerate(charts):
+        cfg = _apply_chart_defaults(cfg)
+        err = _validate_chart_config(cfg)
+        if err:
+            errors.append(f"Chart {i + 1}: {err}")
+        charts[i] = cfg
+
+    if errors:
+        return "⚠️ Validation errors:\n" + "\n".join(errors)
+
+    _ai_dashboard_charts = list(charts)
+    return f"✅ Dashboard created with {len(charts)} charts."
+
+
+def add_dashboard_chart(chart: dict) -> str:
+    """
+    Add a single chart to the existing AI dashboard.
+
+    chart: dict with keys type, x, y, title, and optionally color, palette, etc.
+           Same format as set_dashboard_charts.
+
+    Returns confirmation with the chart's position index.
+    """
+    if _df is None:
+        return "⚠️ No dataset loaded."
+    chart = _apply_chart_defaults(chart)
+    err = _validate_chart_config(chart)
+    if err:
+        return f"⚠️ {err}"
+    _ai_dashboard_charts.append(chart)
+    return (
+        f"✅ Chart added at position {len(_ai_dashboard_charts)}. "
+        f"Dashboard now has {len(_ai_dashboard_charts)} charts."
+    )
+
+
+def update_dashboard_chart(index: int, updates: dict) -> str:
+    """
+    Update a specific chart in the AI dashboard by its 0-based index.
+    Only the provided fields are changed; others remain as-is.
+
+    index: 0-based position of the chart to update
+    updates: dict of fields to change, e.g. {"type": "קו / Line", "title": "New Title"}
+
+    Returns confirmation or error.
+    """
+    if index < 0 or index >= len(_ai_dashboard_charts):
+        return (
+            f"⚠️ Invalid chart index {index}. "
+            f"Dashboard has {len(_ai_dashboard_charts)} charts (indices 0–{len(_ai_dashboard_charts) - 1})."
+        )
+    if "type" in updates:
+        updates["type"] = _normalise_chart_type(updates["type"])
+    # Validate any new column references
+    if _df is not None:
+        valid_cols = set(_df.columns.tolist())
+        for key in ("x", "y", "color"):
+            val = updates.get(key)
+            if val and val != "—" and val not in valid_cols:
+                return f"⚠️ {key} column '{val}' not found in dataset"
+    _ai_dashboard_charts[index].update(updates)
+    return f"✅ Chart {index} updated."
+
+
+def remove_dashboard_chart(index: int) -> str:
+    """
+    Remove a chart from the AI dashboard by its 0-based index.
+
+    index: 0-based position of the chart to remove
+
+    Returns confirmation with remaining chart count.
+    """
+    if index < 0 or index >= len(_ai_dashboard_charts):
+        return (
+            f"⚠️ Invalid chart index {index}. "
+            f"Dashboard has {len(_ai_dashboard_charts)} charts."
+        )
+    removed = _ai_dashboard_charts.pop(index)
+    return (
+        f"✅ Removed chart '{removed.get('title', index)}'. "
+        f"Dashboard now has {len(_ai_dashboard_charts)} charts."
+    )

@@ -12,17 +12,13 @@ from pathlib import Path
 import pandas as pd
 import numpy as np
 import streamlit as st
-from chatlas import ChatAnthropic
+from chatlas import ChatAnthropic, ChatOpenAI, ChatGoogle, ChatGroq
 
 # ─── Structured Logging (SRE) ─────────────────────────────────────────────────
-_LOG_FILE = Path(__file__).parent / "audit.log"
 logging.basicConfig(
     level=logging.INFO,
     format="%(asctime)s [%(levelname)s] %(message)s",
-    handlers=[
-        logging.StreamHandler(),
-        logging.FileHandler(str(_LOG_FILE), mode="a", encoding="utf-8"),
-    ],
+    handlers=[logging.StreamHandler()],
 )
 _logger = logging.getLogger("data_analyst_bot")
 
@@ -50,6 +46,8 @@ TEXT = {
         "page_title":       "🤖 צ'אטבוט ניתוח נתונים",
         "page_sub":         "שאל אותי כל שאלה על הנתונים שלך",
         "lang_btn":         "🇬🇧 English",
+        "theme_btn_light":  "☀️ מצב בהיר",
+        "theme_btn_dark":   "🌙 מצב כהה",
         "api_header":       "🔑 מפתח API",
         "api_label":        "Anthropic API Key",
         "api_placeholder":  "sk-ant-...",
@@ -94,7 +92,22 @@ TEXT = {
         "tab_chat":           "🤖 AI Chat",
         "tab_charts":         "📊 גרפים",
         "tab_dashboard":      "📈 דשבורד",
+        "tab_ai_dashboard":   "🤖 דשבורד AI",
         "tab_data":           "🗂 נתונים",
+        # AI Dashboard
+        "ai_dash_input_ph":       "תאר את הדשבורד שאתה רוצה...",
+        "ai_dash_welcome":        "שלום! אני יכול לבנות דשבורד שלם על סמך תיאור שלך.\n\nלדוגמה:\n- \"בנה דשבורד מכירות עם גרפים לפי חודש, מוצר ואזור\"\n- \"הוסף גרף עוגה לקטגוריות\"\n- \"שנה את הגרף הראשון לגרף קו\"",
+        "ai_dash_clear":          "🗑 נקה דשבורד",
+        "ai_dash_clear_chat":     "🗑 נקה שיחה",
+        "ai_dash_export":         "💾 ייצא",
+        "ai_dash_charts_count":   "גרפים בדשבורד",
+        "ai_dash_layout":         "פריסה",
+        "ai_dash_copy_to_manual": "📋 העתק לדשבורד ידני",
+        "ai_dash_copied":         "✅ הגרפים הועתקו!",
+        "ai_dash_no_data":        "⬆️ העלה קובץ נתונים קודם",
+        "ai_dash_empty_title":    "הדשבורד ריק",
+        "ai_dash_empty_hint":     "תאר את הדשבורד שתרצה בשדה הקלט למטה",
+        "ai_dash_remove_chart":   "× הסר",
         # בונה גרפים
         "chart_type":         "סוג גרף",
         "chart_x":            "ציר X",
@@ -128,7 +141,14 @@ TEXT = {
         # ספק AI
         "provider_header":    "🤖 ספק AI",
         "provider_cloud":     "☁️ Anthropic Claude",
+        "provider_openai":    "🧠 OpenAI",
+        "provider_google":    "✨ Google Gemini",
+        "provider_groq":      "⚡ Groq",
         "provider_local":     "🦙 Ollama (מקומי)",
+        "anthropic_model_lbl": "מודל Claude",
+        "openai_model_lbl":   "מודל OpenAI",
+        "google_model_lbl":   "מודל Gemini",
+        "groq_model_lbl":     "מודל Groq",
         "ollama_model_lbl":   "מודל Ollama",
         "ollama_status_ok":   "✅ Ollama פעיל",
         "ollama_status_err":  "❌ Ollama לא נמצא",
@@ -136,7 +156,7 @@ TEXT = {
         "ollama_no_models":   "לא נמצאו מודלים. הפעל: ollama pull llama3.2",
         "ollama_refresh":     "🔄 רענן",
         # הודעות נוספות
-        "no_key_hint":        "⚠️ הגדר מפתח API או חבר Ollama בסייד-בר",
+        "no_key_hint":        "⚠️ הגדר מפתח API או חבר Ollama",
         "columns_expander":   "עמודות",
         "data_showing":       "מציג {n:,} מתוך {total:,} שורות",
         "no_numeric_cols":    "אין עמודות מספריות לסטטיסטיקות",
@@ -150,13 +170,13 @@ TEXT = {
         "chart_ai_palette":   "פלטת צבעים",
         "chart_figsize":      "גודל גרף",
         # ייצוא
-        "export_chat":           "📄 ייצא שיחה (HTML)",
+        "export_chat":           "📄 HTML",
         "export_chat_help":      "הורד את השיחה עם הגרפים כקובץ HTML",
-        "export_dashboard":      "💾 ייצא דשבורד (HTML)",
+        "export_dashboard":      "💾 דשבורד HTML",
         "export_dashboard_help": "הורד את כל הגרפים בדשבורד כ-HTML אינטראקטיבי",
-        "export_ai_charts":      "🖼 הורד גרפי AI (ZIP)",
+        "export_ai_charts":      "🖼 גרפים ZIP",
         "export_ai_charts_help": "הורד את כל גרפי ה-AI שנוצרו בשיחה",
-        "export_pdf":            "📑 ייצא שיחה (PDF)",
+        "export_pdf":            "📑 PDF",
         "export_pdf_help":       "הורד את השיחה כקובץ PDF עם גרפים",
         # קבצים גדולים / אבטחה / onboarding
         "large_file_notice":     "ℹ️ הקובץ גדול — מוצג מדגם של {n:,} שורות מתוך {total:,}",
@@ -193,7 +213,7 @@ TEXT = {
         "add_to_dash_from_chat": "📌 הוסף לדשבורד",
         "chart_added_from_chat": "✅ גרף נוסף לדשבורד!",
         # דוח
-        "export_report":         "📊 ייצא דוח (HTML)",
+        "export_report":         "📊 דוח HTML",
         "export_report_help":    "דוח מסודר של השיחה עם כל הממצאים והגרפים",
         # כפתורי export בתחתית הצ'אט
         "exports_lbl":           "⬇️ ייצוא שיחה",
@@ -211,16 +231,101 @@ TEXT = {
         "ds_missing_ok":         "✅ אין ערכים חסרים",
         "ds_missing_warn":       "⚠️ {n:,} ערכים חסרים",
         "ds_prompt":             "💡 מה תרצה לנתח?",
+        "ds_loaded":             "נטען!",
+        "ds_data":               "נתונים",
+        "ds_col_label":          "עמודות:",
         # chips
         "quick_chips_lbl":       "💡 שאלות להמשך:",
         # tabs חדשים בדשבורד
         "chart_builder_hdr":     "📊 בנה גרף ידני",
         "data_view_hdr":         "🗂 צפייה בנתונים",
+        # p2 — thinking indicator + new-chat + dashboard empty state
+        "thinking_indicator":    "מנתח...",
+        "new_chat_btn":          "✨ שיחה חדשה",
+        "new_chat_help":         "נקה את השיחה והתחל מחדש",
+        "dash_empty_title":      "הדשבורד ריק כרגע",
+        "dash_empty_step1":      "בחר עמודות ב<strong>בונה הגרפים</strong> למעלה",
+        "dash_empty_step2":      "לחץ <strong>הוסף לדשבורד</strong> אחרי יצירת הגרף",
+        "dash_empty_step3":      "או הוסף גרפים ישירות מהצ'אט עם הכפתור 📌",
+        "dash_empty_tip":        "💡 טיפ: ניתן לבנות מספר גרפים ולסדר אותם בפריסה שונה",
+        # guided tour
+        "tour_restart":          "🎯 הדרכה",
+        "tour_skip":             "✕ סגור",
+        "tour_next":             "הבא ›",
+        "tour_done_btn":         "✓ סיום",
+        "tour_step_of":          "שלב {step} מתוך {total}",
+        "tour_step1_title":      "📂 שלב 1 — העלאת נתונים",
+        "tour_step1_body":       "לחץ על **'טען דאטה לדוגמה'** כדי להתחיל, או העלה קובץ CSV / Excel משלך.",
+        "tour_step1_hint":       "⬇️ הכפתור נמצא בתיבת ההעלאה הגדולה",
+        "tour_step2_title":      "💬 שלב 2 — שאל את ה-AI",
+        "tour_step2_body":       "כתוב שאלה על הנתונים בתיבת הצ'אט, למשל: **'תראה לי סקירה'**.",
+        "tour_step2_hint":       "⬇️ תיבת הצ'אט נמצאת בתחתית המסך",
+        "tour_step3_title":      "📊 שלב 3 — בנה גרף בדשבורד",
+        "tour_step3_body":       "לחץ על לשונית **'דשבורד'**, בחר גרף ועמודות, ולחץ **'הוסף לדשבורד'**.",
+        "tour_step3_hint":       "⬆️ לחץ על לשונית 'דשבורד' למעלה",
+        "tour_done_title":       "🎉 כל הכבוד — סיימת את ההדרכה!",
+        "tour_done_body":        "עכשיו אתה מוכן! תוכל לייצא שיחות, לשלוח במייל, ולהוסיף עוד גרפים.",
+        # code viewer panel
+        "code_panel_lbl":        "🔎 קוד מאחורי התשובה",
+        "code_tab_analysis":     "📊 שאילתת נתונים",
+        "code_tab_chart":        "🎨 קוד יצירת הגרף",
+        "code_panel_hint":       "לחץ על סמל ⎘ בפינת הקוד להעתקה",
+        "code_toggle_help":      "הצג/הסתר קוד",
+        "copy_response_help":    "העתק תשובה",
+        "copy_response_ok":      "הועתק!",
+        "chart_code_label":      "📋 קוד Python של הגרף",
+        "chart_builder_err":     "שגיאה ביצירת גרף",
+        # sidebar redesign — conversation history
+        "new_conv_btn":          "✏️ שיחה חדשה",
+        "conv_history_hdr":      "📜 שיחות",
+        "settings_hdr":          "⚙️ הגדרות",
+        "no_saved_chats":        "אין שיחות שמורות עדיין",
+        "chat_loaded_note":      "📂 שיחה טעונה — ה-AI מתחיל הקשר חדש",
+        "chat_date_today":       "היום",
+        "chat_date_earlier":     "מוקדם יותר",
+        "del_chat_btn":          "🗑",
+        "del_chat_help":         "מחק שיחה זו",
+        "dataset_badge_tpl":     "📊 {name} · {rows:,} שורות · {cols} עמודות",
+        # chat-based onboarding
+        "onboard_welcome": (
+            "👋 שלום! אני מנתח הנתונים שלך.\n\n"
+            "אני יכול לעזור לך:\n"
+            "- 📊 לנתח ולסכם נתונים\n"
+            "- 📈 ליצור גרפים ויזואליים\n"
+            "- 🔍 לגלות תובנות ומגמות\n\n"
+            "בוא נתחיל! ראשית, בחר כיצד להתחבר ל-AI:"
+        ),
+        "onboard_api_key_prompt": (
+            "מעולה! הכנס את מפתח ה-API של Anthropic למטה.\n\n"
+            "🔒 המפתח נשמר בזיכרון בלבד ולא נכתב לדיסק."
+        ),
+        "onboard_openai_prompt": (
+            "מעולה! הכנס את מפתח ה-API של OpenAI למטה.\n\n"
+            "🔒 המפתח נשמר בזיכרון בלבד ולא נכתב לדיסק."
+        ),
+        "onboard_google_prompt": (
+            "מעולה! הכנס את מפתח ה-API של Google Gemini למטה.\n\n"
+            "🔒 המפתח נשמר בזיכרון בלבד ולא נכתב לדיסק."
+        ),
+        "onboard_groq_prompt": (
+            "מעולה! הכנס את מפתח ה-API של Groq למטה.\n\n"
+            "🔒 המפתח נשמר בזיכרון בלבד ולא נכתב לדיסק."
+        ),
+        "onboard_ollama_prompt": "בוא נגדיר את חיבור Ollama המקומי.",
+        "onboard_data_prompt": (
+            "🎉 ה-AI מוכן! כעת העלה קובץ נתונים כדי להתחיל לנתח.\n\n"
+            "אני תומך בקבצי CSV, Excel, JSON, TSV ו-Parquet."
+        ),
+        "api_hint_chat":       "🔗 קבל מפתח ב-console.anthropic.com",
+        "api_invalid_key":     "המפתח חייב להתחיל ב-sk-ant-",
+        "no_key_hint_chat":    "⚠️ הגדר מפתח API או חבר Ollama למעלה",
     },
     "en": {
         "page_title":       "🤖 Data Analyst Chatbot",
         "page_sub":         "Ask me anything about your data",
         "lang_btn":         "🇮🇱 עברית",
+        "theme_btn_light":  "☀️ Light Mode",
+        "theme_btn_dark":   "🌙 Dark Mode",
         "api_header":       "🔑 API Key",
         "api_label":        "Anthropic API Key",
         "api_placeholder":  "sk-ant-...",
@@ -266,7 +371,22 @@ TEXT = {
         "tab_chat":           "🤖 AI Chat",
         "tab_charts":         "📊 Charts",
         "tab_dashboard":      "📈 Dashboard",
+        "tab_ai_dashboard":   "🤖 AI Dashboard",
         "tab_data":           "🗂 Data",
+        # AI Dashboard
+        "ai_dash_input_ph":       "Describe the dashboard you want...",
+        "ai_dash_welcome":        "Hello! I can build a complete dashboard from your description.\n\nExamples:\n- \"Build a sales dashboard with charts by month, product, and region\"\n- \"Add a pie chart for categories\"\n- \"Change the first chart to a line chart\"",
+        "ai_dash_clear":          "🗑 Clear Dashboard",
+        "ai_dash_clear_chat":     "🗑 Clear Chat",
+        "ai_dash_export":         "💾 Export",
+        "ai_dash_charts_count":   "charts in dashboard",
+        "ai_dash_layout":         "Layout",
+        "ai_dash_copy_to_manual": "📋 Copy to Manual Dashboard",
+        "ai_dash_copied":         "✅ Charts copied!",
+        "ai_dash_no_data":        "⬆️ Upload a data file first",
+        "ai_dash_empty_title":    "Dashboard is empty",
+        "ai_dash_empty_hint":     "Describe the dashboard you want in the input below",
+        "ai_dash_remove_chart":   "× Remove",
         # Chart builder
         "chart_type":         "Chart Type",
         "chart_x":            "X Axis",
@@ -300,7 +420,14 @@ TEXT = {
         # AI Provider
         "provider_header":    "🤖 AI Provider",
         "provider_cloud":     "☁️ Anthropic Claude",
+        "provider_openai":    "🧠 OpenAI",
+        "provider_google":    "✨ Google Gemini",
+        "provider_groq":      "⚡ Groq",
         "provider_local":     "🦙 Ollama (local)",
+        "anthropic_model_lbl": "Claude Model",
+        "openai_model_lbl":   "OpenAI Model",
+        "google_model_lbl":   "Gemini Model",
+        "groq_model_lbl":     "Groq Model",
         "ollama_model_lbl":   "Ollama Model",
         "ollama_status_ok":   "✅ Ollama running",
         "ollama_status_err":  "❌ Ollama not found",
@@ -308,7 +435,7 @@ TEXT = {
         "ollama_no_models":   "No models found. Run: ollama pull llama3.2",
         "ollama_refresh":     "🔄 Refresh",
         # Extra strings
-        "no_key_hint":        "⚠️ Configure API key or connect Ollama in the sidebar",
+        "no_key_hint":        "⚠️ Configure API key or connect Ollama",
         "columns_expander":   "Columns",
         "data_showing":       "Showing {n:,} of {total:,} rows",
         "no_numeric_cols":    "No numeric columns for statistics",
@@ -322,13 +449,13 @@ TEXT = {
         "chart_ai_palette":   "Color palette",
         "chart_figsize":      "Figure size",
         # Export
-        "export_chat":           "📄 Export Conversation (HTML)",
+        "export_chat":           "📄 HTML",
         "export_chat_help":      "Download the conversation with charts as an HTML file",
-        "export_dashboard":      "💾 Export Dashboard (HTML)",
+        "export_dashboard":      "💾 Dashboard HTML",
         "export_dashboard_help": "Download all dashboard charts as an interactive HTML file",
-        "export_ai_charts":      "🖼 Download AI Charts (ZIP)",
+        "export_ai_charts":      "🖼 Charts ZIP",
         "export_ai_charts_help": "Download all AI-generated charts from this conversation",
-        "export_pdf":            "📑 Export Chat (PDF)",
+        "export_pdf":            "📑 PDF",
         "export_pdf_help":       "Download the conversation as a PDF with charts",
         # Large files / security / onboarding
         "large_file_notice":     "ℹ️ Large file — showing a sample of {n:,} of {total:,} rows",
@@ -365,7 +492,7 @@ TEXT = {
         "add_to_dash_from_chat": "📌 Add to Dashboard",
         "chart_added_from_chat": "✅ Chart added to Dashboard!",
         # report
-        "export_report":         "📊 Export Report (HTML)",
+        "export_report":         "📊 Report HTML",
         "export_report_help":    "Structured report of the conversation with all findings and charts",
         # export buttons label
         "exports_lbl":           "⬇️ Export conversation",
@@ -383,11 +510,94 @@ TEXT = {
         "ds_missing_ok":         "✅ No missing values",
         "ds_missing_warn":       "⚠️ {n:,} missing values",
         "ds_prompt":             "💡 What would you like to analyse?",
+        "ds_loaded":             "loaded!",
+        "ds_data":               "Data",
+        "ds_col_label":          "Columns:",
         # chips
         "quick_chips_lbl":       "💡 Suggested questions:",
         # dashboard tab sections
         "chart_builder_hdr":     "📊 Build a Chart",
         "data_view_hdr":         "🗂 Data View",
+        # p2 — thinking indicator + new-chat + dashboard empty state
+        "thinking_indicator":    "Analyzing...",
+        "new_chat_btn":          "✨ New Chat",
+        "new_chat_help":         "Clear conversation and start fresh",
+        "dash_empty_title":      "Your dashboard is empty",
+        "dash_empty_step1":      "Choose columns in the <strong>Chart Builder</strong> above",
+        "dash_empty_step2":      "Click <strong>Add to Dashboard</strong> after building a chart",
+        "dash_empty_step3":      "Or add charts directly from the AI chat using the 📌 button",
+        "dash_empty_tip":        "💡 Tip: Build multiple charts and arrange them in different layouts",
+        # guided tour
+        "tour_restart":          "🎯 Tour",
+        "tour_skip":             "✕ Close",
+        "tour_next":             "Next ›",
+        "tour_done_btn":         "✓ Done",
+        "tour_step_of":          "Step {step} of {total}",
+        "tour_step1_title":      "📂 Step 1 — Upload Data",
+        "tour_step1_body":       "Click **'Load Sample Data'** to get started, or upload your own CSV / Excel file.",
+        "tour_step1_hint":       "⬇️ The button is inside the large upload zone below",
+        "tour_step2_title":      "💬 Step 2 — Ask the AI",
+        "tour_step2_body":       "Type a question about your data in the chat box, e.g. **'Give me a data overview'**.",
+        "tour_step2_hint":       "⬇️ The chat input is at the bottom of the screen",
+        "tour_step3_title":      "📊 Step 3 — Build a Dashboard Chart",
+        "tour_step3_body":       "Click the **'Dashboard'** tab, pick chart type and columns, then click **'Add to Dashboard'**.",
+        "tour_step3_hint":       "⬆️ Click the 'Dashboard' tab above",
+        "tour_done_title":       "🎉 Great job — you finished the tour!",
+        "tour_done_body":        "You're all set! You can export chats, send via email, and build more charts.",
+        # code viewer panel
+        "code_panel_lbl":        "🔎 Code behind this answer",
+        "code_tab_analysis":     "📊 Data Query",
+        "code_tab_chart":        "🎨 Chart Code",
+        "code_panel_hint":       "Click the ⎘ icon in the code corner to copy",
+        "code_toggle_help":      "Show/hide code",
+        "copy_response_help":    "Copy response",
+        "copy_response_ok":      "Copied!",
+        "chart_code_label":      "📋 Python chart code",
+        "chart_builder_err":     "Error building chart",
+        # sidebar redesign — conversation history
+        "new_conv_btn":          "✏️ New Conversation",
+        "conv_history_hdr":      "📜 Conversations",
+        "settings_hdr":          "⚙️ Settings",
+        "no_saved_chats":        "No saved conversations yet",
+        "chat_loaded_note":      "📂 Conversation loaded — AI is starting a fresh context",
+        "chat_date_today":       "Today",
+        "chat_date_earlier":     "Earlier",
+        "del_chat_btn":          "🗑",
+        "del_chat_help":         "Delete this conversation",
+        "dataset_badge_tpl":     "📊 {name} · {rows:,} rows · {cols} columns",
+        # chat-based onboarding
+        "onboard_welcome": (
+            "👋 Hello! I'm your AI Data Analyst.\n\n"
+            "I can help you:\n"
+            "- 📊 Analyze and summarize data\n"
+            "- 📈 Create visualizations\n"
+            "- 🔍 Discover insights and trends\n\n"
+            "Let's get started! First, choose how to connect to AI:"
+        ),
+        "onboard_api_key_prompt": (
+            "Great! Enter your Anthropic API key below.\n\n"
+            "🔒 Your key is stored in memory only and is never saved to disk."
+        ),
+        "onboard_openai_prompt": (
+            "Great! Enter your OpenAI API key below.\n\n"
+            "🔒 Your key is stored in memory only and is never saved to disk."
+        ),
+        "onboard_google_prompt": (
+            "Great! Enter your Google Gemini API key below.\n\n"
+            "🔒 Your key is stored in memory only and is never saved to disk."
+        ),
+        "onboard_groq_prompt": (
+            "Great! Enter your Groq API key below.\n\n"
+            "🔒 Your key is stored in memory only and is never saved to disk."
+        ),
+        "onboard_ollama_prompt": "Let's set up your local Ollama connection.",
+        "onboard_data_prompt": (
+            "🎉 AI is ready! Now upload a data file to start analyzing.\n\n"
+            "I support CSV, Excel, JSON, TSV, and Parquet files."
+        ),
+        "api_hint_chat":       "🔗 Get your key at console.anthropic.com",
+        "api_invalid_key":     "Key must start with sk-ant-",
+        "no_key_hint_chat":    "⚠️ Set up API key or connect Ollama above",
     },
 }
 
@@ -445,6 +655,57 @@ Response:
 - When writing Hebrew, keep markdown formatting clean
 """.strip()
 
+# ─── AI Dashboard System Prompt ──────────────────────────────────────────────
+
+AI_DASHBOARD_SYSTEM_PROMPT = """
+You are an expert Dashboard Designer assistant.
+Respond in the same language the user writes in (Hebrew or English).
+
+## Your Role
+You help users build complete interactive dashboards by generating chart configurations.
+You do NOT create individual analyses or text reports — you ONLY build dashboards.
+
+## Process
+1. FIRST call get_data_overview() to understand the dataset columns and types.
+2. Based on the user's description, decide which charts best tell the data story.
+3. Call set_dashboard_charts() with a list of chart config dicts to create the full dashboard.
+4. To modify an existing chart: call update_dashboard_chart(index, updates).
+5. To add a chart: call add_dashboard_chart(chart).
+6. To remove a chart: call remove_dashboard_chart(index).
+
+## Chart Config Format
+Each chart config is a dict with these keys:
+- "type": one of "Bar", "Line", "Area", "Pie", "Histogram", "Scatter", "Box Plot", "Heatmap"
+          (Short forms like "bar", "line", "pie" are also accepted)
+- "x": column name for X-axis (MUST be an actual column in the dataset)
+- "y": column name for Y-axis (numeric column; use "—" if not needed, e.g. for Pie)
+- "title": descriptive chart title in the user's language
+- "color": (optional) column name for color grouping, or null
+- "palette": (optional) one of "Blue", "Purple", "Green", "Orange", "Pink", "Teal"
+- "sample_size": (optional) number of rows to plot, default 500
+- "corr_method": (optional, Heatmap only) "pearson" | "spearman" | "kendall"
+
+## Guidelines
+- Aim for 3-6 charts per dashboard that tell a coherent data story.
+- Vary chart types for visual diversity — don't create 6 bar charts.
+- Use meaningful, descriptive titles in the user's language.
+- Assign different color palettes to different charts for visual variety.
+- When the user asks to modify: change ONLY the requested chart(s), preserve everything else.
+- When the user says "first chart" or "chart 1", that means index 0.
+
+## Response Format
+After calling the tool(s), respond with a SHORT summary:
+1. What charts were created or modified
+2. What story the dashboard tells about the data
+3. 1-2 suggested improvements the user could request
+
+## Guardrails (STRICT)
+- ONLY use column names that actually exist in the dataset (verify with get_data_overview).
+- NEVER invent column names or data.
+- NEVER suggest modifying the user's source data.
+- NEVER execute code — use only the dashboard tools.
+""".strip()
+
 # ─── Ollama Helper ────────────────────────────────────────────────────────────
 
 @st.cache_data(ttl=30, show_spinner=False)
@@ -463,6 +724,71 @@ def get_ollama_models() -> tuple:
         return True, models
     except Exception:
         return False, []
+
+
+# ─── Provider Registry ────────────────────────────────────────────────────────
+PROVIDER_REGISTRY = {
+    "anthropic": {
+        "label_key":     "provider_cloud",
+        "key_prefix":    "sk-ant-",
+        "key_session":   "api_key",
+        "env_var":       "ANTHROPIC_API_KEY",
+        "default_model": "claude-opus-4-6",
+        "models":        ["claude-opus-4-6", "claude-sonnet-4-20250514"],
+        "model_session": "anthropic_model",
+        "placeholder":   "sk-ant-...",
+        "hint_url":      "console.anthropic.com",
+        "max_tokens":    8192,
+    },
+    "openai": {
+        "label_key":     "provider_openai",
+        "key_prefix":    "sk-",
+        "key_session":   "openai_api_key",
+        "env_var":       "OPENAI_API_KEY",
+        "default_model": "gpt-4o",
+        "models":        ["gpt-4o", "gpt-4o-mini", "gpt-4-turbo", "o3-mini"],
+        "model_session": "openai_model",
+        "placeholder":   "sk-...",
+        "hint_url":      "platform.openai.com/api-keys",
+        "max_tokens":    4096,
+    },
+    "google": {
+        "label_key":     "provider_google",
+        "key_prefix":    "AIza",
+        "key_session":   "google_api_key",
+        "env_var":       "GOOGLE_API_KEY",
+        "default_model": "gemini-2.0-flash",
+        "models":        ["gemini-2.0-flash", "gemini-2.5-pro", "gemini-1.5-pro"],
+        "model_session": "google_model",
+        "placeholder":   "AIza...",
+        "hint_url":      "aistudio.google.com/apikey",
+        "max_tokens":    None,
+    },
+    "groq": {
+        "label_key":     "provider_groq",
+        "key_prefix":    "gsk_",
+        "key_session":   "groq_api_key",
+        "env_var":       "GROQ_API_KEY",
+        "default_model": "llama-3.3-70b-versatile",
+        "models":        ["llama-3.3-70b-versatile", "mixtral-8x7b-32768", "gemma2-9b-it"],
+        "model_session": "groq_model",
+        "placeholder":   "gsk_...",
+        "hint_url":      "console.groq.com/keys",
+        "max_tokens":    4096,
+    },
+    "ollama": {
+        "label_key":     "provider_local",
+        "key_prefix":    None,
+        "key_session":   None,
+        "env_var":       None,
+        "default_model": "",
+        "models":        [],
+        "model_session": "ollama_model",
+        "placeholder":   None,
+        "hint_url":      "ollama.com",
+        "max_tokens":    None,
+    },
+}
 
 
 # ─── Data Validation ──────────────────────────────────────────────────────────
@@ -522,12 +848,26 @@ def auto_fix_dataframe(df: pd.DataFrame) -> pd.DataFrame:
 # ─── Chart Builder (Plotly) ───────────────────────────────────────────────────
 
 COLOR_PALETTES = {
+    # ── Sequential (original) ──
     "סגול / Purple": {"single": "#7c6af7", "seq": px.colors.sequential.Purp,    "scale": "Purp"},
     "כחול / Blue":   {"single": "#1a73e8", "seq": px.colors.sequential.Blues,   "scale": "Blues"},
     "ירוק / Green":  {"single": "#2ecc71", "seq": px.colors.sequential.Greens,  "scale": "Greens"},
     "כתום / Orange": {"single": "#f39c12", "seq": px.colors.sequential.Oranges, "scale": "Oranges"},
     "ורוד / Pink":   {"single": "#f76a8a", "seq": px.colors.sequential.RdPu,    "scale": "RdPu"},
     "ציאן / Teal":   {"single": "#00bcd4", "seq": px.colors.sequential.Teal,    "scale": "Teal"},
+    # ── Sequential (new) ──
+    "שקיעה / Sunset":  {"single": "#ff6b6b", "seq": px.colors.sequential.Sunsetdark, "scale": "Sunsetdark"},
+    "אפור / Gray":     {"single": "#888888", "seq": px.colors.sequential.gray,        "scale": "gray"},
+    "מג'נטה / Magenta": {"single": "#e040fb", "seq": px.colors.sequential.Magenta,    "scale": "Magenta"},
+    # ── Diverging (ideal for heatmaps with +/- values) ──
+    "כחול-אדום / RdBu":  {"single": "#3b7dd8", "seq": px.colors.diverging.RdBu,     "scale": "RdBu"},
+    "חם-קר / Spectral":   {"single": "#d73027", "seq": px.colors.diverging.Spectral,  "scale": "Spectral"},
+    "ירוק-סגול / PRGn":  {"single": "#1b7837", "seq": px.colors.diverging.PRGn,      "scale": "PRGn"},
+    # ── Qualitative (best for categorical data with many groups) ──
+    "צבעוני / Vivid":  {"single": "#e45756", "seq": px.colors.qualitative.Vivid,   "scale": "Vivid"},
+    "בולד / Bold":     {"single": "#7c4dff", "seq": px.colors.qualitative.Bold,    "scale": "Bold"},
+    "פסטל / Pastel":   {"single": "#aec7e8", "seq": px.colors.qualitative.Pastel,  "scale": "Pastel"},
+    "D3 / D3":         {"single": "#1f77b4", "seq": px.colors.qualitative.D3,      "scale": "D3"},
 }
 
 CHART_TYPES = [
@@ -535,26 +875,308 @@ CHART_TYPES = [
     "היסטוגרמה / Histogram", "פיזור / Scatter", "Box Plot", "Heatmap",
 ]
 
+# ── Normalisation maps: accept English-only, Hebrew-only or bilingual keys ───
+_CHART_KEY_MAP: dict[str, str] = {}
+for _ct in CHART_TYPES:
+    _CHART_KEY_MAP[_ct] = _ct
+    _CHART_KEY_MAP[_ct.lower()] = _ct
+    if " / " in _ct:
+        _he, _en = _ct.split(" / ", 1)
+        _CHART_KEY_MAP[_he] = _ct
+        _CHART_KEY_MAP[_en] = _ct
+        _CHART_KEY_MAP[_he.lower()] = _ct
+        _CHART_KEY_MAP[_en.lower()] = _ct
 
-def apply_chart_style(fig: go.Figure) -> go.Figure:
+_PALETTE_KEY_MAP: dict[str, str] = {}
+for _pk in COLOR_PALETTES:
+    _PALETTE_KEY_MAP[_pk] = _pk
+    if " / " in _pk:
+        _he, _en = _pk.split(" / ", 1)
+        _PALETTE_KEY_MAP[_he] = _pk
+        _PALETTE_KEY_MAP[_en] = _pk
+
+
+def _norm_chart_type(ct: str) -> str:
+    """Map any chart type string to the internal bilingual key."""
+    return _CHART_KEY_MAP.get(ct, _CHART_KEY_MAP.get(ct.strip().lower(), ct))
+
+
+def _norm_palette(p: str) -> str:
+    """Map any palette name to the internal bilingual key."""
+    return _PALETTE_KEY_MAP.get(p, _PALETTE_KEY_MAP.get(p.strip(), p))
+
+
+def _chart_types_for_lang() -> list[str]:
+    """Return chart type labels for current UI language."""
+    if st.session_state.get("lang") == "en":
+        return [ct.split(" / ")[-1] if " / " in ct else ct for ct in CHART_TYPES]
+    return list(CHART_TYPES)
+
+
+def _palettes_for_lang() -> dict[str, dict]:
+    """Return palette dict with display keys for current UI language."""
+    if st.session_state.get("lang") == "en":
+        return {(k.split(" / ")[-1] if " / " in k else k): v
+                for k, v in COLOR_PALETTES.items()}
+    return dict(COLOR_PALETTES)
+
+
+# ─── Theme Color Tokens ─────────────────────────────────────────────────────
+THEME_COLORS = {
+    "dark": {
+        # Text
+        "text-primary": "#ececec", "text-secondary": "#b4b4b4",
+        "text-tertiary": "#999", "text-muted": "#888", "text-disabled": "#555",
+        # Backgrounds
+        "bg-app": "#212121", "bg-sidebar": "#171717",
+        "bg-surface": "#2f2f2f", "bg-surface-raised": "#303030",
+        "bg-plot": "#2a2a2a", "bg-code": "#1e1e1e",
+        "bg-hover": "rgba(255,255,255,0.08)",
+        "bg-legend": "rgba(255,255,255,0.07)",
+        # Borders
+        "border-default": "#383838", "border-strong": "#4e4e4e",
+        "border-subtle": "#2a2a2a",
+        # Accent
+        "accent": "#10a37f", "accent-hover": "#0d8c6b",
+        "accent-bg": "#2a3a2e",
+        # Status badges
+        "status-ok-bg": "#1a3a2a", "status-ok-text": "#56d364",
+        "status-ok-border": "#2ea043",
+        "status-err-bg": "#3a1a1a", "status-err-text": "#f85149",
+        "status-err-border": "#da3633",
+        # Plotly charts
+        "chart-plot": "#2a2a2a", "chart-grid": "#383838",
+        "chart-zeroline": "#4e4e4e", "chart-axis": "#b4b4b4",
+        "chart-spine": "#4e4e4e", "chart-hover-bg": "#2f2f2f",
+        # Scrollbar
+        "scrollbar-thumb": "#4e4e4e", "scrollbar-hover": "#666",
+        # Chat input (Calcalist-style)
+        "input-bg": "#343541", "input-border": "#565869",
+        "input-shadow": "0 4px 16px rgba(0,0,0,0.35)",
+        "input-focus-border": "#10a37f",
+        "input-focus-shadow": "0 4px 20px rgba(16,163,127,0.25)",
+        "input-placeholder": "#8e8ea0",
+        # Gradients
+        "welcome-gradient": "linear-gradient(135deg, #10a37f08, #10a37f04)",
+        "input-gradient": "linear-gradient(to bottom, transparent, #212121 40%)",
+    },
+    "light": {
+        # Text
+        "text-primary": "#1a1a1a", "text-secondary": "#555",
+        "text-tertiary": "#777", "text-muted": "#888", "text-disabled": "#bbb",
+        # Backgrounds
+        "bg-app": "#ffffff", "bg-sidebar": "#f5f5f5",
+        "bg-surface": "#f0f0f0", "bg-surface-raised": "#e8e8e8",
+        "bg-plot": "#fafafa", "bg-code": "#f5f5f5",
+        "bg-hover": "rgba(0,0,0,0.05)",
+        "bg-legend": "rgba(0,0,0,0.04)",
+        # Borders
+        "border-default": "#ddd", "border-strong": "#ccc",
+        "border-subtle": "#e5e5e5",
+        # Accent (same teal — good contrast in both modes)
+        "accent": "#10a37f", "accent-hover": "#0d8c6b",
+        "accent-bg": "#e6f5ef",
+        # Status badges
+        "status-ok-bg": "#e6f5ef", "status-ok-text": "#1a7f37",
+        "status-ok-border": "#2ea043",
+        "status-err-bg": "#fde8e8", "status-err-text": "#cf222e",
+        "status-err-border": "#da3633",
+        # Plotly charts
+        "chart-plot": "#fafafa", "chart-grid": "#e0e0e0",
+        "chart-zeroline": "#ccc", "chart-axis": "#555",
+        "chart-spine": "#ccc", "chart-hover-bg": "#ffffff",
+        # Scrollbar
+        "scrollbar-thumb": "#ccc", "scrollbar-hover": "#aaa",
+        # Chat input (Calcalist-style)
+        "input-bg": "#ffffff", "input-border": "#d9d9e3",
+        "input-shadow": "0 4px 16px rgba(0,0,0,0.10)",
+        "input-focus-border": "#10a37f",
+        "input-focus-shadow": "0 4px 20px rgba(16,163,127,0.18)",
+        "input-placeholder": "#8e8ea0",
+        # Gradients
+        "welcome-gradient": "linear-gradient(135deg, #10a37f10, #10a37f06)",
+        "input-gradient": "linear-gradient(to bottom, transparent, #ffffff 40%)",
+    },
+}
+
+
+def apply_chart_style(fig: go.Figure, theme: str = "dark") -> go.Figure:
+    """Apply a polished, modern visual style to any Plotly figure."""
+    tc = THEME_COLORS[theme]
+    _PAPER = "rgba(0,0,0,0)"   # transparent — inherits Streamlit's background
+    _PLOT  = tc["chart-plot"]
+    _GRID  = tc["chart-grid"]
+    _ZERO  = tc["chart-zeroline"]
+    _TEXT  = tc["text-primary"]
+    _AXIS  = tc["chart-axis"]
+    _LINE  = tc["chart-spine"]
+    _HOVER = tc["chart-hover-bg"]
+    _lang  = st.session_state.get("lang", "he")
+
+    # Preserve any existing title text; if none, use "" to prevent Plotly.js "undefined" rendering
+    _title_text = getattr(getattr(fig.layout, "title", None), "text", None) or ""
+
     fig.update_layout(
-        paper_bgcolor="white",
-        plot_bgcolor="#f8f9fc",
-        font_family="Segoe UI, Helvetica Neue, Arial, sans-serif",
-        font_color="#1a1a2e",
-        title_font_color="#1a1a2e",
+        height=480,
+        paper_bgcolor=_PAPER,
+        plot_bgcolor=_PLOT,
+        margin=dict(t=64, b=52, l=60, r=24, pad=4),
+        font=dict(
+            family="Inter, Segoe UI, system-ui, -apple-system, sans-serif",
+            size=13,
+            color=_TEXT,
+        ),
+        # ── Typography hierarchy ──
+        title=dict(
+            text=_title_text,
+            font=dict(size=17, color=_TEXT),
+            x=0.02,
+            xanchor="left",
+            yanchor="top",
+            pad=dict(b=12),
+        ),
+        # ── Legend: horizontal, below chart, transparent ──
+        legend=dict(
+            bgcolor="rgba(0,0,0,0)",
+            bordercolor="rgba(0,0,0,0)",
+            borderwidth=0,
+            font=dict(size=11, color=tc["text-secondary"]),
+            itemsizing="constant",
+            orientation="h",
+            yanchor="top",
+            y=-0.15,
+            xanchor="center",
+            x=0.5,
+            itemwidth=30,
+        ),
+        # ── X axis ──
+        xaxis=dict(
+            showgrid=True,
+            gridcolor=_GRID,
+            gridwidth=1,
+            griddash="dot",
+            zeroline=True,
+            zerolinecolor=_ZERO,
+            zerolinewidth=1.5,
+            linecolor=_LINE,
+            linewidth=1,
+            tickfont=dict(size=11, color=_AXIS),
+            title_font=dict(size=12, color=_AXIS),
+            title_standoff=12,
+            automargin=True,
+            ticklabeloverflow="allow",
+            separatethousands=True,
+        ),
+        # ── Y axis ──
+        yaxis=dict(
+            showgrid=True,
+            gridcolor=_GRID,
+            gridwidth=1,
+            griddash="dot",
+            zeroline=True,
+            zerolinecolor=_ZERO,
+            zerolinewidth=1.5,
+            linecolor=_LINE,
+            linewidth=1,
+            tickfont=dict(size=11, color=_AXIS),
+            title_font=dict(size=12, color=_AXIS),
+            title_standoff=12,
+            automargin=True,
+            separatethousands=True,
+        ),
+        # ── Hover ──
+        hoverlabel=dict(
+            bgcolor=_HOVER,
+            bordercolor=_GRID,
+            font_size=13,
+            font_color=_TEXT,
+            font_family="Inter, Segoe UI, sans-serif",
+            align="right" if _lang == "he" else "left",
+            namelength=-1,
+        ),
+        # ── Colorbar for heatmaps ──
+        coloraxis_colorbar=dict(
+            tickfont=dict(color=_AXIS, size=11),
+            title_font=dict(color=_AXIS, size=12),
+            thickness=14,
+            len=0.8,
+            outlinewidth=0,
+        ),
+        # ── Smooth transitions ──
+        transition=dict(
+            duration=500,
+            easing="cubic-in-out",
+            ordering="traces first",
+        ),
     )
+
+    # ── Auto-rotate x labels when many categories ──
+    x_data = fig.data[0].x if fig.data and hasattr(fig.data[0], "x") and fig.data[0].x is not None else []
+    if hasattr(x_data, "__len__") and len(x_data) > 8:
+        fig.update_layout(xaxis_tickangle=-45)
+    # ── Trace-level refinements ──
+    # Bar: clean borders, slight transparency
+    fig.update_traces(
+        selector=dict(type="bar"),
+        marker_line_width=0,
+        opacity=0.92,
+    )
+    # Scatter: refined markers with subtle outline
+    fig.update_traces(
+        selector=dict(type="scatter", mode="markers"),
+        marker=dict(size=8, opacity=0.8, line=dict(width=1, color="rgba(255,255,255,0.3)")),
+    )
+    # Line traces: thicker line
+    fig.update_traces(
+        selector=dict(type="scatter", mode="lines"),
+        line=dict(width=2.5),
+    )
+    # Pie: modern donut with subtle slice separation
+    fig.update_traces(
+        selector=dict(type="pie"),
+        hole=0.4,
+        textfont=dict(size=12, color=_TEXT),
+        textposition="auto",
+        pull=[0.02] * 20,
+    )
+
+    # ── Hover templates per trace type ──
+    fig.update_traces(
+        selector=dict(type="bar"),
+        hovertemplate="<b>%{x}</b><br>%{y:,.0f}<extra></extra>",
+    )
+    fig.update_traces(
+        selector=dict(type="scatter", mode="markers"),
+        hovertemplate="<b>%{x}</b><br>Y: %{y:,.2f}<extra></extra>",
+    )
+    fig.update_traces(
+        selector=dict(type="scatter", mode="lines"),
+        hovertemplate="<b>%{x}</b><br>%{y:,.2f}<extra></extra>",
+    )
+    fig.update_traces(
+        selector=dict(type="pie"),
+        hovertemplate="<b>%{label}</b><br>Count: %{value:,}<br>%{percent}<extra></extra>",
+    )
+    fig.update_traces(
+        selector=dict(type="histogram"),
+        hovertemplate="%{x}<br>Count: %{y:,}<extra></extra>",
+    )
+    fig.update_traces(
+        selector=dict(type="heatmap"),
+        hovertemplate="Row: %{y}<br>Col: %{x}<br>Value: %{z:.3f}<extra></extra>",
+    )
+
     return fig
 
 
 def build_chart(config: dict, df: pd.DataFrame, sample_size: int = 500) -> go.Figure:
     """Build a Plotly figure from a chart-config dict."""
-    chart_type   = config.get("type", CHART_TYPES[0])
+    chart_type   = _norm_chart_type(config.get("type", CHART_TYPES[0]))
     x_col        = config.get("x")
     y_col        = config.get("y", "—")
     color        = config.get("color")
     title        = config.get("title", "")
-    palette_name = config.get("palette", list(COLOR_PALETTES.keys())[0])
+    palette_name = _norm_palette(config.get("palette", list(COLOR_PALETTES.keys())[0]))
     corr_method  = config.get("corr_method", "pearson")
     palette      = COLOR_PALETTES.get(palette_name, list(COLOR_PALETTES.values())[0])
 
@@ -621,21 +1243,139 @@ def build_chart(config: dict, df: pd.DataFrame, sample_size: int = 500) -> go.Fi
             fig  = px.imshow(
                 corr,
                 color_continuous_scale=palette["scale"],
-                title=title or f"מטריצת קורלציה ({corr_method})",
+                title=title or (f"Correlation Matrix ({corr_method})"
+                      if st.session_state.get("lang") == "en"
+                      else f"מטריצת קורלציה ({corr_method})"),
                 text_auto=True,
             )
 
         else:
             fig = go.Figure()
-            fig.add_annotation(text=f"סוג גרף לא מוכר: {chart_type}", showarrow=False)
+            _unk = (f"Unknown chart type: {chart_type}"
+                    if st.session_state.get("lang") == "en"
+                    else f"סוג גרף לא מוכר: {chart_type}")
+            fig.add_annotation(text=_unk, showarrow=False)
 
-        return apply_chart_style(fig)
+        return apply_chart_style(fig, theme=st.session_state.get("theme", "dark"))
 
     except Exception as exc:
         err_fig = go.Figure()
         err_fig.add_annotation(text=f"שגיאה ביצירת גרף: {exc}", showarrow=False,
                                font={"color": "#c5221f"})
-        return apply_chart_style(err_fig)
+        return apply_chart_style(err_fig, theme=st.session_state.get("theme", "dark"))
+
+
+def _build_chart_code(config: dict, sample_size: int = 500) -> str:
+    """Generate equivalent Python/Plotly code for a chart config dict."""
+    ct           = _norm_chart_type(config.get("type", CHART_TYPES[0]))
+    x            = config.get("x", "")
+    y            = config.get("y", "—")
+    color        = config.get("color")
+    title        = config.get("title", "")
+    pal_name     = _norm_palette(config.get("palette", list(COLOR_PALETTES.keys())[0]))
+    corr_method  = config.get("corr_method", "pearson")
+    t            = ct.split(" / ")[0]
+    palette      = COLOR_PALETTES.get(pal_name, list(COLOR_PALETTES.values())[0])
+    single       = repr(palette["single"])
+    _PAL_SEQ = {
+        # Sequential
+        "סגול / Purple": "px.colors.sequential.Purp",
+        "כחול / Blue":   "px.colors.sequential.Blues",
+        "ירוק / Green":  "px.colors.sequential.Greens",
+        "כתום / Orange": "px.colors.sequential.Oranges",
+        "ורוד / Pink":   "px.colors.sequential.RdPu",
+        "ציאן / Teal":   "px.colors.sequential.Teal",
+        "שקיעה / Sunset":  "px.colors.sequential.Sunsetdark",
+        "אפור / Gray":     "px.colors.sequential.gray",
+        "מג'נטה / Magenta": "px.colors.sequential.Magenta",
+        # Diverging
+        "כחול-אדום / RdBu":  "px.colors.diverging.RdBu",
+        "חם-קר / Spectral":   "px.colors.diverging.Spectral",
+        "ירוק-סגול / PRGn":  "px.colors.diverging.PRGn",
+        # Qualitative
+        "צבעוני / Vivid":  "px.colors.qualitative.Vivid",
+        "בולד / Bold":     "px.colors.qualitative.Bold",
+        "פסטל / Pastel":   "px.colors.qualitative.Pastel",
+        "D3 / D3":         "px.colors.qualitative.D3",
+    }
+    seq          = _PAL_SEQ.get(pal_name, "px.colors.sequential.Blues")
+    scale        = repr(palette.get("scale", "Blues"))
+    title_arg    = f', title="{title}"' if title else ""
+    color_arg    = f', color="{color}"' if color else ""
+
+    lines = [
+        "import plotly.express as px",
+        "import plotly.graph_objects as go",
+        "",
+        "# df  ← your pandas DataFrame",
+    ]
+
+    if t == "עמודות":
+        if y and y != "—":
+            lines += [
+                f"dfs = df.head({sample_size})",
+                f'fig = px.bar(dfs, x="{x}", y="{y}"{color_arg},',
+                f'             color_discrete_sequence={seq}{title_arg})',
+            ]
+        else:
+            lines += [
+                f'counts = df["{x}"].value_counts().head(20).reset_index()',
+                f'counts.columns = ["{x}", "count"]',
+                f'fig = px.bar(counts, x="{x}", y="count",',
+                f'             color_discrete_sequence=[{single}]{title_arg})',
+            ]
+    elif t == "קו":
+        y_use = y if y and y != "—" else x
+        lines += [
+            f"dfs = df.head({sample_size})",
+            f'fig = px.line(dfs, x="{x}", y="{y_use}"{color_arg},',
+            f'              color_discrete_sequence=[{single}]{title_arg})',
+        ]
+    elif t == "שטח":
+        y_use = y if y and y != "—" else x
+        lines += [
+            f"dfs = df.head({sample_size})",
+            f'fig = px.area(dfs, x="{x}", y="{y_use}"{color_arg},',
+            f'              color_discrete_sequence=[{single}]{title_arg})',
+        ]
+    elif t == "עוגה":
+        lines += [
+            f'counts = df["{x}"].value_counts().head(10).reset_index()',
+            f'counts.columns = ["{x}", "count"]',
+            f'fig = px.pie(counts, names="{x}", values="count",',
+            f'             color_discrete_sequence={seq}{title_arg})',
+        ]
+    elif t == "היסטוגרמה":
+        col = y if y and y != "—" else x
+        lines += [
+            f'fig = px.histogram(df, x="{col}",',
+            f'                   color_discrete_sequence=[{single}]{title_arg})',
+        ]
+    elif t == "פיזור":
+        y_use = y if y and y != "—" else x
+        lines += [
+            f"dfs = df.head({sample_size})",
+            f'fig = px.scatter(dfs, x="{x}", y="{y_use}"{color_arg},',
+            f'                 color_discrete_sequence=[{single}]{title_arg})',
+        ]
+    elif t == "Box Plot":
+        y_use = y if y and y != "—" else x
+        x_arg = f'x="{x}", ' if x != y_use else ""
+        lines += [
+            f'fig = px.box(df, {x_arg}y="{y_use}"{color_arg},',
+            f'             color_discrete_sequence=[{single}]{title_arg})',
+        ]
+    elif t == "Heatmap":
+        lines += [
+            f'corr = df.select_dtypes(include="number").corr(method="{corr_method}").round(3)',
+            f'fig = px.imshow(corr, color_continuous_scale={scale},',
+            f'                text_auto=True{title_arg})',
+        ]
+    else:
+        lines += [f"fig = go.Figure()  # unknown chart type"]
+
+    lines += ["", "fig.show()"]
+    return "\n".join(lines)
 
 
 # ─── Export Helpers ───────────────────────────────────────────────────────────
@@ -743,69 +1483,87 @@ def export_chat_pdf(messages: list, title: str = "Chat Export") -> bytes:
     except ImportError:
         return b""
 
-    # DejaVuSans from matplotlib — full Unicode + Hebrew support
-    font_path = (
-        Path(matplotlib.__file__).parent / "mpl-data" / "fonts" / "ttf" / "DejaVuSans.ttf"
-    )
+    try:
+        # DejaVuSans from matplotlib — full Unicode + Hebrew support
+        font_path = (
+            Path(matplotlib.__file__).parent / "mpl-data" / "fonts" / "ttf" / "DejaVuSans.ttf"
+        )
 
-    def _is_rtl(text: str) -> bool:
-        return any("\u0590" <= c <= "\u05FF" for c in text)
+        def _is_rtl(text: str) -> bool:
+            return any("\u0590" <= c <= "\u05FF" for c in text)
 
-    def _fix(text: str) -> str:
-        return get_display(text) if _is_rtl(text) else text
+        def _fix(text: str) -> str:
+            return get_display(text) if _is_rtl(text) else text
 
-    pdf = FPDF()
-    pdf.set_auto_page_break(auto=True, margin=15)
-    if font_path.exists():
-        pdf.add_font("DejaVu", "", str(font_path), uni=True)
-        fnt = "DejaVu"
-    else:
-        fnt = "Helvetica"
+        pdf = FPDF()
+        pdf.set_auto_page_break(auto=True, margin=15)
+        if font_path.exists():
+            pdf.add_font("DejaVu", "", str(font_path), uni=True)
+            fnt = "DejaVu"
+        else:
+            fnt = "Helvetica"
 
-    pdf.add_page()
-    pdf.set_font(fnt, size=18)
-    pdf.cell(0, 10, _fix(title), align="R" if _is_rtl(title) else "L", ln=True)
-    pdf.ln(4)
+        pdf.add_page()
+        page_title_w = pdf.w - pdf.l_margin - pdf.r_margin
+        pdf.set_font(fnt, size=18)
+        pdf.multi_cell(page_title_w, 10, _fix(title), align="R" if _is_rtl(title) else "L")
+        pdf.ln(4)
 
-    for msg in messages:
-        role = msg.get("role", "")
-        content = msg.get("content", "")
-        charts = msg.get("charts", [])
+        # Usable page width (same value used for all multi_cell calls)
+        page_w = pdf.w - pdf.l_margin - pdf.r_margin
 
-        # Role label
-        pdf.set_font(fnt, size=9)
-        pdf.set_fill_color(230, 240, 255) if role == "assistant" else pdf.set_fill_color(230, 250, 230)
-        pdf.set_text_color(80, 80, 80)
-        label = "Assistant:" if role == "assistant" else "User:"
-        pdf.cell(0, 6, label, fill=True, ln=True)
+        for msg in messages:
+            role = msg.get("role", "")
+            content = msg.get("content", "")
+            charts = msg.get("charts", [])
 
-        # Message lines
-        pdf.set_font(fnt, size=10)
-        pdf.set_text_color(30, 30, 30)
-        for line in content.split("\n"):
-            clean = line.strip()
-            if not clean:
-                pdf.ln(2)
-                continue
-            # Strip markdown bullets/headers to avoid junk chars
-            clean = clean.lstrip("*#>-").strip()
-            if not clean:
-                continue
-            fixed = _fix(clean)
-            pdf.multi_cell(0, 5, fixed, align="R" if _is_rtl(clean) else "L")
+            # Role label
+            pdf.set_font(fnt, size=9)
+            if role == "assistant":
+                pdf.set_fill_color(230, 240, 255)
+            else:
+                pdf.set_fill_color(230, 250, 230)
+            pdf.set_text_color(80, 80, 80)
+            label = "Assistant:" if role == "assistant" else "User:"
+            pdf.cell(0, 6, label, fill=True, ln=True)
 
-        # Embedded chart images
-        for chart_path in charts:
-            p = Path(chart_path)
-            if p.exists():
-                if pdf.get_y() > 220:
-                    pdf.add_page()
-                pdf.image(str(p), x=10, w=180)
-                pdf.ln(3)
+            # Message lines
+            pdf.set_font(fnt, size=10)
+            pdf.set_text_color(30, 30, 30)
+            for line in content.split("\n"):
+                clean = line.strip()
+                if not clean:
+                    pdf.ln(2)
+                    continue
+                # Strip markdown bullets/headers to avoid junk chars
+                clean = clean.lstrip("*#>-").strip()
+                if not clean:
+                    continue
+                fixed = _fix(clean)
+                if not fixed:
+                    continue
+                try:
+                    pdf.multi_cell(page_w, 5, fixed, align="R" if _is_rtl(clean) else "L")
+                except Exception:
+                    try:
+                        pdf.multi_cell(page_w, 5, "[...]", align="L")
+                    except Exception:
+                        pdf.ln(5)
 
-        pdf.ln(3)
+            # Embedded chart images
+            for chart_path in charts:
+                p = Path(chart_path)
+                if p.exists():
+                    if pdf.get_y() > 220:
+                        pdf.add_page()
+                    pdf.image(str(p), x=10, w=180)
+                    pdf.ln(3)
 
-    return bytes(pdf.output())
+            pdf.ln(3)
+
+        return bytes(pdf.output())
+    except Exception:
+        return b""
 
 
 def export_report_html(messages: list, title: str = "Analysis Report") -> bytes:
@@ -845,12 +1603,17 @@ def export_report_html(messages: list, title: str = "Analysis Report") -> bytes:
         if a:
             for cp in a.get("charts", []):
                 charts_html += _img_tag(cp)
-            for snippet in a.get("code_snippets", []):
+            for _s in a.get("code_snippets", []):
+                _snip_code = _s["code"] if isinstance(_s, dict) else _s
+                _snip_lbl  = (
+                    "🎨 קוד גרף" if isinstance(_s, dict) and _s.get("type") == "chart"
+                    else "📊 קוד ניתוח"
+                )
                 charts_html += (
                     f'<details style="margin:8px 0;">'
-                    f'<summary style="cursor:pointer;color:#555;font-size:.85em;">🔎 קוד</summary>'
+                    f'<summary style="cursor:pointer;color:#555;font-size:.85em;">{_snip_lbl}</summary>'
                     f'<pre style="background:#f4f4f4;padding:10px;border-radius:6px;'
-                    f'font-size:.82em;overflow-x:auto;">{_escape(snippet)}</pre>'
+                    f'font-size:.82em;overflow-x:auto;">{_escape(_snip_code)}</pre>'
                     f'</details>'
                 )
         rows_html.append(f"""
@@ -938,9 +1701,12 @@ def send_email_smtp(
 
 
 # ─── Custom CSS ───────────────────────────────────────────────────────────────
-def inject_css(lang: str) -> None:
-    direction = "rtl" if lang == "he" else "ltr"
+def inject_css(lang: str, theme: str = "dark") -> None:
+    # Direction is always LTR to avoid bidi scrambling of mixed Hebrew+English.
+    # For Hebrew we right-align paragraphs so the text reads naturally from right.
+    direction = "ltr"
     text_align = "right" if lang == "he" else "left"
+    tc = THEME_COLORS[theme]
     st.markdown(f"""
 <style>
 /* ═══════════════════════════════════════════════
@@ -948,52 +1714,144 @@ def inject_css(lang: str) -> None:
 ═══════════════════════════════════════════════ */
 *, *::before, *::after {{ box-sizing: border-box; }}
 
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap');
 body {{
-    font-family: "Segoe UI", "Helvetica Neue", Arial, sans-serif;
+    font-family: 'Inter', system-ui, -apple-system, 'Segoe UI', sans-serif;
     -webkit-text-size-adjust: 100%;   /* prevent iOS font inflation */
 }}
+.stApp, .stMarkdown {{
+    font-family: 'Inter', system-ui, -apple-system, 'Segoe UI', sans-serif !important;
+}}
 
-/* ── RTL / LTR ── */
-.stChatMessage p, .stChatMessage li {{
-    direction: {direction};
+/* ── Theme: override Streamlit chrome ── */
+.stApp {{
+    background-color: {tc['bg-app']} !important;
+    color: {tc['text-primary']} !important;
+}}
+/* Force theme text color on ALL Streamlit native elements */
+.stApp p, .stApp span, .stApp label, .stApp div,
+.stApp li, .stApp td, .stApp th, .stApp caption,
+.stMarkdown, .stMarkdown p, .stMarkdown span, .stMarkdown li,
+.stChatMessage, .stChatMessage p, .stChatMessage span,
+.stChatMessage li, .stChatMessage td, .stChatMessage th,
+[data-testid="stCaptionContainer"],
+[data-testid="stMarkdownContainer"],
+[data-testid="stMarkdownContainer"] p,
+[data-testid="stText"],
+.uploadedFileName, .stFileUploader label,
+.stFileUploader section, .stFileUploader div,
+.stRadio label, .stCheckbox label,
+.stMultiSelect span, .stNumberInput label,
+.stSlider label, .stColorPicker label {{
+    color: {tc['text-primary']} !important;
+}}
+/* Subtle text elements — secondary color */
+[data-testid="stCaptionContainer"] {{
+    color: {tc['text-secondary']} !important;
+}}
+.stFileUploader section {{
+    background-color: {tc['bg-surface']} !important;
+    border-color: {tc['border-default']} !important;
+    color: {tc['text-secondary']} !important;
+}}
+.stFileUploader [data-testid="stFileUploaderDropzone"] {{
+    background-color: {tc['bg-surface']} !important;
+    border-color: {tc['border-strong']} !important;
+}}
+.stFileUploader [data-testid="stFileUploaderDropzone"] span,
+.stFileUploader [data-testid="stFileUploaderDropzone"] small,
+.stFileUploader [data-testid="stFileUploaderDropzone"] div {{
+    color: {tc['text-secondary']} !important;
+}}
+/* Streamlit popover/dropdown menus */
+[data-baseweb="popover"], [data-baseweb="menu"],
+[data-baseweb="select"] [data-baseweb="menu"] {{
+    background-color: {tc['bg-surface']} !important;
+}}
+[data-baseweb="menu"] li, [data-baseweb="menu"] li span {{
+    color: {tc['text-primary']} !important;
+}}
+[data-baseweb="menu"] li:hover {{
+    background-color: {tc['bg-hover']} !important;
+}}
+/* Bold / strong text */
+.stApp strong, .stApp b, .stMarkdown strong {{
+    color: {tc['text-primary']} !important;
+}}
+/* Dataframe / table styling */
+.stDataFrame, .stTable {{
+    color: {tc['text-primary']} !important;
+}}
+/* Streamlit alerts (info, warning, success, error) text */
+[data-testid="stAlert"] p, [data-testid="stAlert"] span {{
+    color: {tc['text-primary']} !important;
+}}
+/* Selectbox dropdown list text */
+[data-baseweb="select"] span {{
+    color: {tc['text-primary']} !important;
+}}
+/* Streamlit main block/header area */
+[data-testid="stHeader"] {{
+    background-color: {tc['bg-app']} !important;
+}}
+/* Separator/divider */
+hr, .stApp hr {{
+    border-color: {tc['border-default']} !important;
+}}
+
+/* ── LTR direction, right-aligned for Hebrew paragraphs.
+   unicode-bidi:embed keeps Hebrew characters in their natural
+   right-to-left order without flipping the whole container. ── */
+.stChatMessage p, .stChatMessage li,
+[data-testid="stInfo"] p,
+[data-testid="stWarning"] p,
+[data-testid="stSuccess"] p,
+[data-testid="stError"] p,
+[data-testid="stMarkdown"] p,
+[data-testid="stMarkdown"] li {{
+    direction: ltr;
     text-align: {text_align};
+    unicode-bidi: embed;
 }}
 
 /* ── Header ── */
 .app-header {{
     padding: 0.75rem 0 0.5rem;
-    border-bottom: 2px solid #f0f0f0;
+    border-bottom: 1px solid {tc['border-default']};
     margin-bottom: 0.75rem;
 }}
 .app-title {{
     font-size: 1.5rem;        /* mobile default */
     font-weight: 700;
-    color: #1a1a2e;
+    color: {tc['text-primary']} !important;
     direction: {direction};
+    text-align: {text_align};
     line-height: 1.2;
 }}
 .app-sub {{
-    color: #666;
+    color: {tc['text-secondary']} !important;
     font-size: 0.85rem;
     direction: {direction};
+    text-align: {text_align};
 }}
 
 /* ── Sidebar sections ── */
 .sidebar-section {{
-    background: #f8f9fc;
+    background: {tc['bg-surface']};
     border-radius: 10px;
     padding: 0.8rem 1rem;
     margin-bottom: 0.8rem;
-    border: 1px solid #e8eaf0;
+    border: 1px solid {tc['border-default']};
 }}
 .sidebar-label {{
     font-size: 0.78rem;
     font-weight: 600;
-    color: #888;
+    color: {tc['text-secondary']} !important;
     text-transform: uppercase;
     letter-spacing: 0.05em;
     margin-bottom: 0.4rem;
     direction: {direction};
+    text-align: {text_align};
 }}
 
 /* ── Metric cards ── */
@@ -1006,20 +1864,20 @@ body {{
 .metric-card {{
     flex: 1;
     min-width: 70px;
-    background: white;
+    background: {tc['bg-surface']};
     border-radius: 8px;
     padding: 0.5rem 0.7rem;
-    border: 1px solid #e0e4ef;
+    border: 1px solid {tc['border-default']};
     text-align: center;
 }}
 .metric-value {{
     font-size: 1.2rem;
     font-weight: 700;
-    color: #1a73e8;
+    color: {tc['accent']} !important;
 }}
 .metric-label {{
     font-size: 0.7rem;
-    color: #888;
+    color: {tc['text-secondary']} !important;
 }}
 
 /* ── All buttons — touch-friendly min size ── */
@@ -1032,33 +1890,33 @@ body {{
     padding: 0.5rem 0.8rem;
     border-radius: 8px;
     font-size: 0.88rem;
-    border: 1px solid #dde1f0;
-    background: white;
-    color: #333;
+    border: 1px solid {tc['border-strong']};
+    background: {tc['bg-surface']};
+    color: {tc['text-primary']};
     transition: background 0.15s, color 0.15s, border-color 0.15s;
     cursor: pointer;
     -webkit-tap-highlight-color: transparent;
 }}
 .stButton > button:hover,
 .stButton > button:focus-visible {{
-    background: #1a73e8;
+    background: {tc['accent']};
     color: white;
-    border-color: #1a73e8;
+    border-color: {tc['accent']};
     outline: none;
 }}
 
 /* ── Download buttons — distinct accent ── */
 .stDownloadButton > button {{
-    background: #f0f4ff;
-    color: #1a73e8;
-    border-color: #c5d6fa;
+    background: {tc['bg-surface']};
+    color: {tc['accent']};
+    border-color: {tc['border-strong']};
     font-weight: 600;
 }}
 .stDownloadButton > button:hover,
 .stDownloadButton > button:focus-visible {{
-    background: #1a73e8;
+    background: {tc['accent']};
     color: white;
-    border-color: #1a73e8;
+    border-color: {tc['accent']};
     outline: none;
 }}
 .stDownloadButton > button[disabled] {{
@@ -1081,8 +1939,8 @@ body {{
 /* ── Tool badge ── */
 .tool-call-badge {{
     display: inline-block;
-    background: #e8f0fe;
-    color: #1a73e8;
+    background: {tc['accent-bg']};
+    color: {tc['accent']};
     border-radius: 6px;
     padding: 2px 8px;
     font-size: 0.75rem;
@@ -1094,72 +1952,180 @@ body {{
 .chart-wrap {{
     border-radius: 10px;
     overflow: hidden;
-    border: 1px solid #e8eaf0;
+    border: 1px solid {tc['border-default']};
     margin-top: 0.5rem;
     max-width: 100%;
 }}
 
 /* ── Welcome card ── */
 .welcome-card {{
-    background: linear-gradient(135deg, #667eea20, #764ba220);
+    background: {tc['welcome-gradient']};
     border-radius: 12px;
     padding: 1rem 1.2rem;
-    border: 1px solid #dde1f0;
+    border: 1px solid {tc['border-default']};
     direction: {direction};
-}}
-
-/* ── Inline upload zone (step 0) ── */
-.upload-zone {{
-    border: 2px dashed #1a73e8;
-    border-radius: 16px;
-    padding: 40px 24px 32px;
-    text-align: center;
-    background: linear-gradient(135deg, #e8f0fe55, #f0f6ff88);
-    margin: 20px auto;
-    max-width: 560px;
-    direction: {direction};
-}}
-.upload-zone h2 {{
-    color: #1a73e8;
-    margin-bottom: 4px;
-    font-size: 1.4rem;
-}}
-.upload-zone p {{
-    color: #666;
-    margin: 0 0 16px;
-    font-size: .95rem;
-}}
-.upload-divider {{
-    color: #aaa;
-    font-size: .85rem;
-    margin: 14px 0;
-    letter-spacing: 1px;
 }}
 
 /* ── Quick-question chips row ── */
 .chips-label {{
     font-size: .82em;
-    color: #888;
+    color: {tc['text-secondary']} !important;
     margin: 14px 0 6px;
     font-weight: 500;
 }}
 div[data-testid="stHorizontalBlock"] > div[data-testid="stColumn"] > div[data-testid="stButton"] > button.chip-btn {{
-    background: #e8f0fe;
-    color: #1a73e8;
-    border: 1px solid #c5d8fb;
+    background: {tc['bg-surface']};
+    color: {tc['accent']};
+    border: 1px solid {tc['border-strong']};
     border-radius: 20px;
-    font-size: .83em;
+    font-size: .62em;
     padding: 3px 14px;
     min-height: 32px;
 }}
 div[data-testid="stButton"].chip-wrap button {{
-    background: #e8f0fe !important;
-    color: #1a73e8 !important;
-    border: 1px solid #c5d8fb !important;
+    background: {tc['bg-surface']} !important;
+    color: {tc['accent']} !important;
+    border: 1px solid {tc['border-strong']} !important;
     border-radius: 20px !important;
-    font-size: .83em !important;
+    font-size: .62em !important;
     min-height: 32px !important;
     white-space: nowrap;
+}}
+
+/* ── Chart container entry animation ── */
+[data-testid="stPlotlyChart"] {{
+    animation: chartFadeIn 0.4s ease-out;
+}}
+@keyframes chartFadeIn {{
+    from {{ opacity: 0; transform: translateY(8px); }}
+    to   {{ opacity: 1; transform: translateY(0); }}
+}}
+
+/* ── Thinking dots (typing indicator before streaming) ── */
+.thinking-dots {{
+    display: flex;
+    gap: 6px;
+    align-items: center;
+    padding: 6px 2px 10px;
+}}
+.thinking-dots span {{
+    width: 9px;
+    height: 9px;
+    background: {tc['accent']};
+    border-radius: 50%;
+    display: inline-block;
+    animation: thinking-bounce 1.3s infinite ease-in-out;
+    opacity: 0.5;
+}}
+.thinking-dots span:nth-child(2) {{ animation-delay: 0.22s; }}
+.thinking-dots span:nth-child(3) {{ animation-delay: 0.44s; }}
+@keyframes thinking-bounce {{
+    0%, 60%, 100% {{ transform: translateY(0);    opacity: 0.4; }}
+    30%            {{ transform: translateY(-7px); opacity: 1;   }}
+}}
+
+/* ── Dashboard guided empty state ── */
+.dash-empty-state {{
+    text-align: center;
+    padding: 52px 24px 40px;
+    color: {tc['text-secondary']};
+}}
+.dash-empty-icon {{
+    font-size: 3.2rem;
+    margin-bottom: 12px;
+    line-height: 1;
+}}
+.dash-empty-title {{
+    font-size: 1.25rem;
+    color: {tc['text-primary']};
+    font-weight: 600;
+    margin-bottom: 24px;
+}}
+.dash-empty-steps {{
+    display: flex;
+    flex-direction: column;
+    gap: 14px;
+    max-width: 400px;
+    margin: 0 auto 20px;
+    text-align: left;
+}}
+.dash-step {{
+    display: flex;
+    align-items: flex-start;
+    gap: 12px;
+    font-size: 0.93rem;
+    color: {tc['text-secondary']};
+    line-height: 1.4;
+}}
+.step-num {{
+    background: {tc['accent-bg']};
+    color: {tc['accent']};
+    border-radius: 50%;
+    width: 26px;
+    height: 26px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    flex-shrink: 0;
+    font-weight: 700;
+    font-size: 0.82rem;
+}}
+.dash-empty-tip {{
+    font-size: 0.83rem;
+    color: {tc['text-secondary']};
+    margin-top: 20px;
+    opacity: 0.85;
+}}
+
+/* ── Action icon bar CSS is injected inline near the marker element ── */
+/* Force LTR on all buttons so mixed Hebrew+English labels read left-to-right */
+.stButton > button,
+.stDownloadButton > button {{
+    direction: ltr !important;
+    text-align: center !important;
+}}
+
+/* ── Sidebar conversation list ── */
+.conv-section-hdr {{
+    font-size: 0.72rem;
+    font-weight: 700;
+    color: {tc['text-muted']};
+    text-transform: uppercase;
+    letter-spacing: .07em;
+    padding: 4px 2px 6px;
+}}
+.conv-group-label {{
+    font-size: 0.68rem;
+    font-weight: 700;
+    color: {tc['text-muted']};
+    text-transform: uppercase;
+    letter-spacing: .06em;
+    padding: 8px 2px 2px;
+    margin-top: 6px;
+}}
+/* Make conversation buttons look like plain list items */
+section[data-testid="stSidebar"] div[data-testid="stVerticalBlock"] > div div[data-testid="stButton"] button {{
+    background: transparent;
+    border: none;
+    color: {tc['text-primary']};
+    font-size: 0.87rem;
+    text-align: left;
+    padding: 5px 8px;
+    border-radius: 6px;
+    border-left: 3px solid transparent;
+    justify-content: flex-start;
+    font-weight: 400;
+}}
+section[data-testid="stSidebar"] div[data-testid="stVerticalBlock"] > div div[data-testid="stButton"] button:hover {{
+    background: {tc['bg-surface']};
+    color: {tc['text-primary']};
+}}
+.conv-active-indicator {{
+    height: 2px;
+    background: {tc['accent']};
+    border-radius: 2px;
+    margin: -6px 0 4px 0;
+    opacity: 0.6;
 }}
 
 /* ── API key status badge ── */
@@ -1167,9 +2133,9 @@ div[data-testid="stButton"].chip-wrap button {{
     display: inline-flex;
     align-items: center;
     gap: 6px;
-    background: #e6f4ea;
-    color: #1e7e34;
-    border: 1px solid #b7dfbe;
+    background: {tc['status-ok-bg']};
+    color: {tc['status-ok-text']};
+    border: 1px solid {tc['status-ok-border']};
     border-radius: 20px;
     padding: 6px 12px;
     font-size: 0.8rem;
@@ -1182,9 +2148,9 @@ div[data-testid="stButton"].chip-wrap button {{
     display: inline-flex;
     align-items: center;
     gap: 6px;
-    background: #fce8e6;
-    color: #c5221f;
-    border: 1px solid #f5c2c0;
+    background: {tc['status-err-bg']};
+    color: {tc['status-err-text']};
+    border: 1px solid {tc['status-err-border']};
     border-radius: 20px;
     padding: 6px 12px;
     font-size: 0.8rem;
@@ -1195,7 +2161,7 @@ div[data-testid="stButton"].chip-wrap button {{
 }}
 .api-hint {{
     font-size: 0.72rem;
-    color: #888;
+    color: {tc['text-muted']};
     text-align: center;
     margin-top: 4px;
 }}
@@ -1270,7 +2236,7 @@ div[data-testid="stButton"].chip-wrap button {{
     position: fixed;
     top: -50px;
     left: 0;
-    background: #1a73e8;
+    background: {tc['accent']};
     color: white;
     padding: 8px 16px;
     border-radius: 0 0 4px 0;
@@ -1288,7 +2254,7 @@ div[data-testid="stButton"].chip-wrap button {{
 
 /* Visible focus ring on every interactive element */
 *:focus-visible {{
-    outline: 3px solid #1a73e8 !important;
+    outline: 3px solid {tc['accent']} !important;
     outline-offset: 2px !important;
     border-radius: 4px !important;
 }}
@@ -1303,15 +2269,15 @@ div[data-testid="stButton"].chip-wrap button {{
     max-width: 100%;
 }}
 
-/* Ensure sidebar caption text meets 4.5:1 contrast */
+/* Sidebar caption text — theme-aware contrast */
 .sidebar-label {{
-    color: #595959;  /* 7:1 ratio on white */
+    color: {tc['text-secondary']} !important;
 }}
 .metric-label {{
-    color: #595959;
+    color: {tc['text-secondary']} !important;
 }}
 .api-hint {{
-    color: #595959;
+    color: {tc['text-muted']} !important;
 }}
 
 /* ═══════════════════════════════════════════════
@@ -1324,66 +2290,165 @@ div[data-testid="stButton"].chip-wrap button {{
 }}
 
 /* ═══════════════════════════════════════════════
-   DARK MODE  (respects OS preference)
+   CHATGPT-STYLE LAYOUT ENHANCEMENTS
 ═══════════════════════════════════════════════ */
-@media (prefers-color-scheme: dark) {{
-    .app-title {{ color: #e8eaf6; }}
-    .app-sub   {{ color: #9fa8bc; }}
-    .app-header {{ border-bottom-color: #2d2d44; }}
 
-    .sidebar-label {{ color: #9fa8bc; }}
-
-    .metric-card {{
-        background: #1e1e2e;
-        border-color: #2d2d44;
-    }}
-    .metric-value {{ color: #82aaff; }}
-    .metric-label {{ color: #9fa8bc; }}
-
-    .welcome-card {{
-        background: linear-gradient(135deg, #667eea12, #764ba212);
-        border-color: #2d2d44;
-    }}
-
-    .stButton > button {{
-        background: #1e1e2e;
-        color: #c9d1d9;
-        border-color: #30363d;
-    }}
-    .stButton > button:hover {{
-        background: #388bfd;
-        color: white;
-        border-color: #388bfd;
-    }}
-    .stDownloadButton > button {{
-        background: #1c2d4a;
-        color: #79b8ff;
-        border-color: #1f4168;
-    }}
-    .stDownloadButton > button:hover {{
-        background: #388bfd;
-        color: white;
-        border-color: #388bfd;
-    }}
-
-    .tool-call-badge {{
-        background: #1c2d4a;
-        color: #79b8ff;
-    }}
-    .chart-wrap {{ border-color: #2d2d44; }}
-
-    .api-badge-ok {{
-        background: #1a3a2a;
-        color: #56d364;
-        border-color: #2ea043;
-    }}
-    .api-badge-err {{
-        background: #3a1a1a;
-        color: #f85149;
-        border-color: #da3633;
-    }}
-    .api-hint {{ color: #8b949e; }}
+/* ── Centered chat container ── */
+.stMainBlockContainer {{
+    max-width: 900px;
+    margin: 0 auto;
+    padding-left: 1rem;
+    padding-right: 1rem;
 }}
+
+/* ── User message bubble (rounded bg) ── */
+[data-testid="stChatMessage"]:has([data-testid="chatAvatarIcon-user"]) {{
+    background: {tc['bg-surface']} !important;
+    border-radius: 18px !important;
+    padding: 10px 16px !important;
+    border: none !important;
+}}
+/* ── Assistant message (transparent, clean) ── */
+[data-testid="stChatMessage"]:has([data-testid="chatAvatarIcon-assistant"]) {{
+    background: transparent !important;
+    padding: 10px 0 !important;
+    border: none !important;
+}}
+
+/* ── Chat input — Calcalist-style floating pill ── */
+[data-testid="stBottom"] {{
+    padding-top: 24px;
+    background: {tc['input-gradient']} !important;
+}}
+.stChatInput {{
+    background: {tc['input-bg']} !important;
+    border: 1.5px solid {tc['input-border']} !important;
+    border-radius: 28px !important;
+    box-shadow: {tc['input-shadow']} !important;
+    padding: 4px 6px !important;
+    transition: border-color 0.25s ease, box-shadow 0.25s ease !important;
+    outline: none !important;
+}}
+.stChatInput > div, .stChatInput [data-baseweb] {{
+    border: none !important;
+    outline: none !important;
+    box-shadow: none !important;
+    background: transparent !important;
+}}
+.stChatInput *:focus-visible {{
+    outline: none !important;
+}}
+.stChatInput textarea {{
+    background: transparent !important;
+    border: none !important;
+    border-radius: 24px !important;
+    padding: 10px 56px 10px 16px !important;
+    color: {tc['text-primary']} !important;
+    font-size: 1rem;
+    caret-color: {tc['accent']} !important;
+}}
+.stChatInput textarea::placeholder {{
+    color: {tc['input-placeholder']} !important;
+    opacity: 1 !important;
+}}
+.stChatInput:focus-within {{
+    border-color: {tc['input-focus-border']} !important;
+    box-shadow: {tc['input-focus-shadow']} !important;
+    outline: none !important;
+}}
+.stChatInput button {{
+    border-radius: 50% !important;
+    background: {tc['accent']} !important;
+    color: white !important;
+    border: none !important;
+    width: 36px !important;
+    height: 36px !important;
+    min-width: 36px !important;
+    min-height: 36px !important;
+    padding: 0 !important;
+    display: flex !important;
+    align-items: center !important;
+    justify-content: center !important;
+    transition: background 0.2s ease, transform 0.15s ease !important;
+}}
+.stChatInput button:hover {{
+    background: {tc['accent-hover']} !important;
+    transform: scale(1.05) !important;
+}}
+.stChatInput button:active {{
+    transform: scale(0.95) !important;
+}}
+
+/* ── Sidebar — theme background ── */
+[data-testid="stSidebar"] {{
+    background-color: {tc['bg-sidebar']} !important;
+    border-right: 1px solid {tc['border-subtle']} !important;
+}}
+[data-testid="stSidebar"] .stMarkdown {{
+    color: {tc['text-secondary']};
+}}
+
+/* ── Scrollbar — thin & subtle ── */
+::-webkit-scrollbar {{ width: 6px; }}
+::-webkit-scrollbar-track {{ background: transparent; }}
+::-webkit-scrollbar-thumb {{ background: {tc['scrollbar-thumb']}; border-radius: 3px; }}
+::-webkit-scrollbar-thumb:hover {{ background: {tc['scrollbar-hover']}; }}
+
+/* ── Code blocks ── */
+.stCodeBlock {{
+    background: {tc['bg-code']} !important;
+    border: 1px solid {tc['border-default']} !important;
+    border-radius: 8px !important;
+}}
+
+/* ── Tabs — subtle bottom border ── */
+.stTabs [data-baseweb="tab-list"] {{
+    border-bottom: 1px solid {tc['border-default']};
+    gap: 0;
+}}
+.stTabs [data-baseweb="tab"] {{
+    color: {tc['text-secondary']};
+    padding: 8px 20px;
+    font-weight: 500;
+}}
+.stTabs [aria-selected="true"] {{
+    color: {tc['text-primary']} !important;
+    border-bottom-color: {tc['accent']} !important;
+    font-weight: 600;
+}}
+/* Override Streamlit's default red tab indicator */
+[data-baseweb="tab-highlight"] {{
+    background-color: {tc['accent']} !important;
+}}
+
+/* ── Expander — harmonize ── */
+.streamlit-expanderHeader {{
+    color: {tc['text-primary']} !important;
+    font-weight: 500;
+}}
+details[data-testid="stExpander"] {{
+    border-color: {tc['border-default']} !important;
+    background: {tc['bg-plot']} !important;
+    border-radius: 8px !important;
+}}
+
+/* ── Select boxes / inputs ── */
+.stSelectbox > div > div {{
+    background: {tc['bg-surface']} !important;
+    border-color: {tc['border-strong']} !important;
+    color: {tc['text-primary']} !important;
+}}
+.stTextInput > div > div > input {{
+    background: {tc['bg-surface']} !important;
+    border-color: {tc['border-strong']} !important;
+    color: {tc['text-primary']} !important;
+    border-radius: 8px;
+}}
+.stTextInput > div > div > input:focus {{
+    border-color: {tc['accent']} !important;
+    box-shadow: 0 0 0 1px {tc['accent']}33 !important;
+}}
+
 </style>
 """, unsafe_allow_html=True)
 
@@ -1391,7 +2456,9 @@ div[data-testid="stButton"].chip-wrap button {{
 # ─── Session State Init ────────────────────────────────────────────────────────
 def init_state() -> None:
     if "lang" not in st.session_state:
-        st.session_state.lang = "he"
+        st.session_state.lang = "en"
+    if "theme" not in st.session_state:
+        st.session_state.theme = "dark"
     if "messages" not in st.session_state:
         st.session_state.messages = []   # [{role, content, charts:[Path]}]
     if "chat" not in st.session_state:
@@ -1418,7 +2485,7 @@ def init_state() -> None:
     # Rate limiting: max N AI calls per session
     if "_request_count" not in st.session_state:
         st.session_state._request_count = 0
-    # Provider: "anthropic" | "ollama"
+    # Provider: "anthropic" | "openai" | "google" | "groq" | "ollama"
     if "provider" not in st.session_state:
         st.session_state.provider = "anthropic"
     if "ollama_model" not in st.session_state:
@@ -1429,6 +2496,23 @@ def init_state() -> None:
         st.session_state.ollama_models = []
     if "ollama_queried" not in st.session_state:
         st.session_state.ollama_queried = False
+    # New provider API keys + model selectors (OpenAI, Google, Groq)
+    for _pid, _pcfg in PROVIDER_REGISTRY.items():
+        _sk = _pcfg["key_session"]
+        if _sk and _pid != "anthropic" and _pid != "ollama":
+            if _sk not in st.session_state:
+                _ev = os.environ.get(_pcfg["env_var"], "") if _pcfg["env_var"] else ""
+                try:
+                    _sv = st.secrets.get(_pcfg["env_var"], "") if (not _ev and _pcfg["env_var"]) else ""
+                except Exception:
+                    _sv = ""
+                st.session_state[_sk] = _ev or _sv
+                st.session_state[f"{_sk}_from_env"] = bool(_ev or _sv)
+            if f"{_sk}_from_env" not in st.session_state:
+                st.session_state[f"{_sk}_from_env"] = False
+        _mk = _pcfg["model_session"]
+        if _mk and _mk != "ollama_model" and _mk not in st.session_state:
+            st.session_state[_mk] = _pcfg["default_model"]
     # Chart style (for AI/matplotlib charts)
     if "chart_seaborn_style" not in st.session_state:
         st.session_state.chart_seaborn_style = "whitegrid"
@@ -1448,16 +2532,58 @@ def init_state() -> None:
     # Ethics / Privacy
     if "_privacy_accepted" not in st.session_state:
         st.session_state._privacy_accepted = False
+    # UX: hide quick-chips after user clicks one; reset after each AI reply
+    if "chips_hidden" not in st.session_state:
+        st.session_state.chips_hidden = False
+    # Chat-based onboarding: tracks whether provider was explicitly chosen
+    if "_provider_chosen" not in st.session_state:
+        st.session_state._provider_chosen = False
+    # Code panel visibility toggle (icon bar)
+    if "show_code_panels" not in st.session_state:
+        st.session_state.show_code_panels = True
+    # Conversation persistence
+    if "current_chat_id" not in st.session_state:
+        st.session_state.current_chat_id = None   # None until first user message
+    if "chat_just_loaded" not in st.session_state:
+        st.session_state.chat_just_loaded = False
+    # Track which language the dataset summary was generated in, and cache df for regen
+    if "_summary_lang" not in st.session_state:
+        st.session_state._summary_lang = None
+    if "_summary_df" not in st.session_state:
+        st.session_state._summary_df = None
+    if "_summary_name" not in st.session_state:
+        st.session_state._summary_name = None
+    # AI Dashboard tab
+    if "ai_dash_messages" not in st.session_state:
+        st.session_state.ai_dash_messages = []
+    if "ai_dash_chat" not in st.session_state:
+        st.session_state.ai_dash_chat = None
+    if "ai_dashboard_charts" not in st.session_state:
+        st.session_state.ai_dashboard_charts = []
+    # Streaming control (stop button)
+    if "_is_streaming" not in st.session_state:
+        st.session_state._is_streaming = False
+    if "_partial_response" not in st.session_state:
+        st.session_state._partial_response = ""
+    if "_streaming_target" not in st.session_state:
+        st.session_state._streaming_target = None  # "chat" or "ai_dash"
 
 
 def get_active_key() -> str:
-    """Return the API key currently in session (env var takes precedence)."""
-    return st.session_state.api_key
+    """Return the API key for the currently selected provider."""
+    provider = st.session_state.get("provider", "anthropic")
+    cfg = PROVIDER_REGISTRY.get(provider)
+    if cfg and cfg["key_session"]:
+        return st.session_state.get(cfg["key_session"], "")
+    return ""
 
 
 def build_chat():
-    """Build a chat object based on the current provider (Anthropic or Ollama)."""
-    if st.session_state.get("provider", "anthropic") == "ollama":
+    """Build a chatlas chat object for the active provider."""
+    provider = st.session_state.get("provider", "anthropic")
+    cfg = PROVIDER_REGISTRY[provider]
+
+    if provider == "ollama":
         model_name = st.session_state.get("ollama_model", "")
         if not model_name:
             raise ValueError(
@@ -1465,22 +2591,77 @@ def build_chat():
                 "No Ollama model selected — run: ollama pull llama3.2, then choose from the sidebar."
             )
         from chatlas import ChatOllama
-        chat = ChatOllama(
-            model=model_name,
-            system_prompt=SYSTEM_PROMPT,
-        )
+        chat = ChatOllama(model=model_name, system_prompt=SYSTEM_PROMPT)
     else:
         key = get_active_key()
-        chat = ChatAnthropic(
-            model="claude-opus-4-6",
+        model = (st.session_state.get(cfg["model_session"], cfg["default_model"])
+                 if cfg["model_session"] else cfg["default_model"])
+
+        _CHAT_CLASSES = {
+            "anthropic": ChatAnthropic,
+            "openai":    ChatOpenAI,
+            "google":    ChatGoogle,
+            "groq":      ChatGroq,
+        }
+        ChatClass = _CHAT_CLASSES[provider]
+
+        kwargs = dict(
+            model=model,
             system_prompt=SYSTEM_PROMPT,
-            max_tokens=8192,
             api_key=key if key else None,
         )
+        if cfg["max_tokens"]:
+            kwargs["max_tokens"] = cfg["max_tokens"]
+
+        chat = ChatClass(**kwargs)
+
     chat.register_tool(tools.get_data_overview)
     chat.register_tool(tools.run_analysis)
     chat.register_tool(tools.create_chart)
     chat.register_tool(tools.suggest_next_analyses)
+    return chat
+
+
+def build_ai_dash_chat():
+    """Build a chatlas chat object for the AI Dashboard tab (dashboard-specific tools)."""
+    provider = st.session_state.get("provider", "anthropic")
+    cfg = PROVIDER_REGISTRY[provider]
+
+    if provider == "ollama":
+        model_name = st.session_state.get("ollama_model", "")
+        if not model_name:
+            raise ValueError(
+                "לא נבחר מודל Ollama — בחר מודל מהתפריט בסייד-בר\n"
+                "No Ollama model selected — choose from the sidebar."
+            )
+        from chatlas import ChatOllama
+        chat = ChatOllama(model=model_name, system_prompt=AI_DASHBOARD_SYSTEM_PROMPT)
+    else:
+        key = get_active_key()
+        model = (st.session_state.get(cfg["model_session"], cfg["default_model"])
+                 if cfg["model_session"] else cfg["default_model"])
+        _CHAT_CLASSES = {
+            "anthropic": ChatAnthropic,
+            "openai":    ChatOpenAI,
+            "google":    ChatGoogle,
+            "groq":      ChatGroq,
+        }
+        ChatClass = _CHAT_CLASSES[provider]
+        kwargs = dict(
+            model=model,
+            system_prompt=AI_DASHBOARD_SYSTEM_PROMPT,
+            api_key=key if key else None,
+        )
+        if cfg["max_tokens"]:
+            kwargs["max_tokens"] = cfg["max_tokens"]
+        chat = ChatClass(**kwargs)
+
+    # Register dashboard-specific tools
+    chat.register_tool(tools.get_data_overview)
+    chat.register_tool(tools.set_dashboard_charts)
+    chat.register_tool(tools.add_dashboard_chart)
+    chat.register_tool(tools.update_dashboard_chart)
+    chat.register_tool(tools.remove_dashboard_chart)
     return chat
 
 
@@ -1587,17 +2768,40 @@ def text_stream(chat, prompt: str):
         # the tools run as a side-effect and populate tools._pending_charts
 
 
+def _manual_stream(stream_generator, placeholder):
+    """Stream chunks manually via st.empty(), saving partial results.
+
+    Replaces st.write_stream() so we can save partial text to session state
+    for recovery if the user stops the streaming mid-way.
+    """
+    full_parts: list[str] = []
+    for chunk in stream_generator:
+        full_parts.append(chunk)
+        text_so_far = "".join(full_parts)
+        st.session_state._partial_response = text_so_far
+        placeholder.markdown(text_so_far + "▌")
+    # Done — remove typing cursor
+    final = "".join(full_parts)
+    placeholder.markdown(final)
+    return final
+
+
 # ─── Provider Section ─────────────────────────────────────────────────────────
 
-def _render_anthropic_key(T: dict) -> None:
-    """Anthropic API key sub-section (stored in-memory only)."""
-    has_key = bool(st.session_state.api_key)
+def _render_api_key_section(provider: str, T: dict) -> None:
+    """Generic API key + model selector for any keyed provider."""
+    cfg = PROVIDER_REGISTRY[provider]
+    sess_key = cfg["key_session"]
+    env_flag = f"{sess_key}_from_env"
+    has_key = bool(st.session_state.get(sess_key, ""))
+
     if has_key:
-        label = T["api_from_env"] if st.session_state.api_key_from_env else T["api_set"]
+        label = T["api_from_env"] if st.session_state.get(env_flag) else T["api_set"]
         st.markdown(f'<div class="api-badge-ok">{label}</div>', unsafe_allow_html=True)
-        if not st.session_state.api_key_from_env:
-            if st.button(T["api_clear"], use_container_width=True, key="api_clear_btn"):
-                st.session_state.api_key = ""
+        if not st.session_state.get(env_flag):
+            if st.button(T["api_clear"], use_container_width=True,
+                         key=f"api_clear_{provider}"):
+                st.session_state[sess_key] = ""
                 st.session_state.chat = None
                 st.session_state.messages = []
                 st.rerun()
@@ -1605,25 +2809,45 @@ def _render_anthropic_key(T: dict) -> None:
         st.markdown(f'<div class="api-badge-err">{T["api_missing"]}</div>',
                     unsafe_allow_html=True)
         new_key = st.text_input(
-            T["api_label"],
+            T.get(f"{provider}_model_lbl", T["api_label"]),
             type="password",
-            placeholder=T["api_placeholder"],
+            placeholder=cfg["placeholder"],
             help=T["api_help"],
             label_visibility="collapsed",
-            key="api_input_field",
+            key=f"api_input_{provider}",
         )
-        if st.button(T["api_save"], use_container_width=True, key="api_save_btn"):
+        if st.button(T["api_save"], use_container_width=True,
+                     key=f"api_save_{provider}"):
             cleaned = new_key.strip()
-            if cleaned.startswith("sk-ant-"):
-                st.session_state.api_key = cleaned
-                st.session_state.api_key_from_env = False
+            if cleaned.startswith(cfg["key_prefix"]):
+                st.session_state[sess_key] = cleaned
+                st.session_state[env_flag] = False
                 if st.session_state.data_loaded:
                     st.session_state.chat = build_chat()
                 st.rerun()
             else:
-                st.error("המפתח חייב להתחיל ב־ sk-ant-  /  Key must start with sk-ant-")
-        st.markdown(f'<div class="api-hint">🔗 {T["api_hint"]}</div>',
+                _prefix = cfg["key_prefix"]
+                st.error(f"Key must start with {_prefix}  /  המפתח חייב להתחיל ב- {_prefix}")
+        st.markdown(f'<div class="api-hint">🔗 {cfg["hint_url"]}</div>',
                     unsafe_allow_html=True)
+
+    # Model selector (when provider has multiple models and key is set)
+    if has_key and cfg["model_session"] and cfg["models"]:
+        model_key = cfg["model_session"]
+        cur_model = st.session_state.get(model_key, cfg["default_model"])
+        idx = cfg["models"].index(cur_model) if cur_model in cfg["models"] else 0
+        lbl_key = f"{provider}_model_lbl"
+        chosen = st.selectbox(
+            T.get(lbl_key, "Model"),
+            cfg["models"],
+            index=idx,
+            key=f"model_select_{provider}",
+            label_visibility="collapsed",
+        )
+        if chosen != st.session_state.get(model_key):
+            st.session_state[model_key] = chosen
+            if st.session_state.data_loaded:
+                st.session_state.chat = build_chat()
 
 
 def _render_ollama_section(T: dict) -> None:
@@ -1636,6 +2860,7 @@ def _render_ollama_section(T: dict) -> None:
         st.session_state.ollama_queried = True
         if models and not st.session_state.ollama_model:
             st.session_state.ollama_model = models[0]
+            st.rerun()  # advance onboarding automatically
 
     col_status, col_refresh = st.columns([3, 1])
     with col_status:
@@ -1678,18 +2903,21 @@ def _render_ollama_section(T: dict) -> None:
 
 
 def render_provider_section(T: dict) -> None:
-    """Provider toggle: Anthropic Cloud ↔ Ollama Local."""
+    """Provider selector: 5 providers via selectbox."""
     st.markdown(f'<div class="sidebar-label">{T["provider_header"]}</div>',
                 unsafe_allow_html=True)
+
+    provider_ids = list(PROVIDER_REGISTRY.keys())
     cur_provider = st.session_state.get("provider", "anthropic")
-    provider = st.radio(
+    cur_idx = provider_ids.index(cur_provider) if cur_provider in provider_ids else 0
+
+    provider = st.selectbox(
         T["provider_header"],
-        options=["anthropic", "ollama"],
-        format_func=lambda x: T["provider_cloud"] if x == "anthropic" else T["provider_local"],
-        index=0 if cur_provider == "anthropic" else 1,
-        horizontal=True,
+        options=provider_ids,
+        format_func=lambda x: T[PROVIDER_REGISTRY[x]["label_key"]],
+        index=cur_idx,
         label_visibility="collapsed",
-        key="provider_radio",
+        key="provider_select",
     )
     if provider != cur_provider:
         st.session_state.provider = provider
@@ -1697,10 +2925,10 @@ def render_provider_section(T: dict) -> None:
         st.rerun()
 
     st.markdown('<div style="margin-top:0.4rem"></div>', unsafe_allow_html=True)
-    if st.session_state.provider == "ollama":
+    if provider == "ollama":
         _render_ollama_section(T)
     else:
-        _render_anthropic_key(T)
+        _render_api_key_section(provider, T)
 
 
 # ─── Upload helpers (shared by inline + sidebar) ──────────────────────────────
@@ -1720,15 +2948,15 @@ def _make_dataset_summary(df, name: str, T: dict) -> str:
     if len(df.columns) > 7:
         col_list += f" +{len(df.columns) - 7}"
     return (
-        f"📊 **{name}** נטען!\n\n"
+        f"📊 **{name}** {T['ds_loaded']}\n\n"
         f"| | |\n|---|---|\n"
         f"| **{T['ds_rows']}** | {len(df):,} |\n"
         f"| **{T['ds_cols']}** | {len(df.columns)} |\n"
         f"| **{T['ds_numeric']}** | {num_cols} |\n"
         f"| **{T['ds_categorical']}** | {cat_cols} |\n"
         f"| **{T['ds_dates']}** | {date_cols} |\n"
-        f"| **נתונים** | {miss_str} |\n\n"
-        f"**עמודות:** {col_list}\n\n"
+        f"| **{T['ds_data']}** | {miss_str} |\n\n"
+        f"**{T['ds_col_label']}** {col_list}\n\n"
         f"{T['ds_prompt']}"
     )
 
@@ -1741,6 +2969,11 @@ def _init_dataset(df, name: str, file_id, T: dict) -> None:
     st.session_state.chat               = None
     st.session_state.dashboard_charts   = []
     st.session_state.data_warnings      = validate_dataframe(df)
+    # Clear AI Dashboard state
+    st.session_state.ai_dashboard_charts = []
+    st.session_state.ai_dash_messages    = []
+    st.session_state.ai_dash_chat        = None
+    tools.clear_ai_dashboard_charts()
     # First assistant message = dataset summary card
     st.session_state.messages = [{
         "role":          "assistant",
@@ -1750,6 +2983,10 @@ def _init_dataset(df, name: str, file_id, T: dict) -> None:
         "code_snippets": [],
         "is_system":     True,
     }]
+    st.session_state._summary_lang = st.session_state.lang
+    # Cache df + name for language-switch regeneration (tools._df is module-level, lost on reload)
+    st.session_state._summary_df   = df
+    st.session_state._summary_name = name
 
 
 def _handle_uploaded_file(uploaded, T: dict) -> None:
@@ -1814,167 +3051,553 @@ def _render_inline_upload(T: dict) -> None:
         _handle_demo_data(T)
 
 
-def _render_quick_chips(T: dict) -> None:
-    """Row of quick-question chip buttons shown after the last AI reply."""
-    qs = T.get("quick_qs", [])[:5]
+# ─── Chat-Based Onboarding ──────────────────────────────────────────────────
+
+def _get_onboarding_step() -> str:
+    """Determine current onboarding step based on session state.
+
+    Returns one of: 'welcome', 'api_key', 'data', 'done'.
+    """
+    provider = st.session_state.get("provider", "anthropic")
+    if provider == "ollama":
+        has_key = (st.session_state.get("ollama_available", False)
+                   and bool(st.session_state.get("ollama_model")))
+    else:
+        has_key = bool(get_active_key())
+    has_data = st.session_state.get("data_loaded", False)
+
+    if not has_key:
+        # Check if provider has been explicitly chosen by the user
+        if st.session_state.get("_provider_chosen"):
+            return "api_key"
+        return "welcome"
+    if not has_data:
+        return "data"
+    return "done"
+
+
+def _render_onboarding_chat(T: dict) -> None:
+    """Render onboarding flow as chat messages inside the chat tab.
+
+    Replaces the old upload-zone widget and tour bar with a natural
+    conversational flow: welcome → provider → API key → data upload.
+    """
+    step = _get_onboarding_step()
+
+    # ── Step 1: Welcome — provider selection (5 buttons: 3+2 grid) ──────
+    if step == "welcome":
+        with st.chat_message("assistant"):
+            st.markdown(T["onboard_welcome"])
+            # Row 1: cloud providers
+            c1, c2, c3 = st.columns(3)
+            with c1:
+                if st.button(T["provider_cloud"], key="onboard_anthropic",
+                             use_container_width=True):
+                    st.session_state.provider = "anthropic"
+                    st.session_state._provider_chosen = True
+                    st.rerun()
+            with c2:
+                if st.button(T["provider_openai"], key="onboard_openai",
+                             use_container_width=True):
+                    st.session_state.provider = "openai"
+                    st.session_state._provider_chosen = True
+                    st.rerun()
+            with c3:
+                if st.button(T["provider_google"], key="onboard_google",
+                             use_container_width=True):
+                    st.session_state.provider = "google"
+                    st.session_state._provider_chosen = True
+                    st.rerun()
+            # Row 2: speed + local
+            c4, c5 = st.columns(2)
+            with c4:
+                if st.button(T["provider_groq"], key="onboard_groq",
+                             use_container_width=True):
+                    st.session_state.provider = "groq"
+                    st.session_state._provider_chosen = True
+                    st.rerun()
+            with c5:
+                if st.button(T["provider_local"], key="onboard_ollama",
+                             use_container_width=True):
+                    st.session_state.provider = "ollama"
+                    st.session_state._provider_chosen = True
+                    st.rerun()
+
+    # ── Step 2: API key / Ollama setup (generic) ──────────────────────────
+    elif step == "api_key":
+        provider = st.session_state.get("provider", "anthropic")
+        cfg = PROVIDER_REGISTRY[provider]
+        provider_label = T[cfg["label_key"]]
+        # Show chosen provider as context
+        with st.chat_message("assistant"):
+            st.markdown(f"✅ {provider_label}")
+
+        if provider == "ollama":
+            with st.chat_message("assistant"):
+                st.markdown(T["onboard_ollama_prompt"])
+                _render_ollama_section(T)
+        else:
+            prompt_key = f"onboard_{provider}_prompt"
+            prompt_text = T.get(prompt_key, T["onboard_api_key_prompt"])
+            with st.chat_message("assistant"):
+                st.markdown(prompt_text)
+                new_key = st.text_input(
+                    T.get(f"{provider}_model_lbl", T["api_label"]),
+                    type="password",
+                    placeholder=cfg["placeholder"],
+                    label_visibility="collapsed",
+                    key="onboard_api_input",
+                )
+                if st.button(T["api_save"], key="onboard_api_save",
+                             use_container_width=False):
+                    cleaned = new_key.strip()
+                    if cleaned.startswith(cfg["key_prefix"]):
+                        st.session_state[cfg["key_session"]] = cleaned
+                        st.session_state[f"{cfg['key_session']}_from_env"] = False
+                        st.rerun()
+                    else:
+                        _prefix = cfg["key_prefix"]
+                        st.error(f"Key must start with {_prefix}  /  המפתח חייב להתחיל ב- {_prefix}")
+                st.caption(f"🔗 {cfg['hint_url']}")
+
+    # ── Step 3: Data upload ───────────────────────────────────────────────
+    elif step == "data":
+        with st.chat_message("assistant"):
+            st.markdown(T["onboard_data_prompt"])
+
+            uploaded = st.file_uploader(
+                T["upload_label"],
+                type=["csv", "tsv", "xlsx", "xls", "json", "parquet"],
+                label_visibility="collapsed",
+                help=T["upload_help"],
+                key="onboard_uploader",
+            )
+            if uploaded:
+                _handle_uploaded_file(uploaded, T)
+
+            st.markdown(f"**{T['upload_inline_or']}**")
+            if st.button(
+                T["upload_inline_demo"],
+                key="onboard_demo_btn",
+                use_container_width=False,
+            ):
+                _handle_demo_data(T)
+
+
+def _build_context_chips(T: dict) -> list[str]:
+    """Generate context-aware analysis suggestions based on the loaded dataset."""
+    df = tools.get_dataframe()
+    if df is None:
+        return T.get("quick_qs", [])[:5]
+
+    lang = st.session_state.lang
+    num_cols = df.select_dtypes(include="number").columns.tolist()
+    cat_cols = df.select_dtypes(include="object").columns.tolist()
+    date_cols = df.select_dtypes(include="datetime").columns.tolist()
+    suggestions: list[str] = []
+
+    if lang == "he":
+        suggestions.append("תן לי סקירה כללית של הנתונים")
+        if len(num_cols) >= 2:
+            suggestions.append(f"מה הקורלציה בין {num_cols[0]} ל-{num_cols[1]}?")
+        if cat_cols and num_cols:
+            suggestions.append(f"השווה {num_cols[0]} לפי {cat_cols[0]}")
+        if date_cols and num_cols:
+            suggestions.append(f"הצג מגמת {num_cols[0]} לאורך זמן")
+        elif num_cols:
+            suggestions.append(f"מה ההתפלגות של {num_cols[0]}?")
+        if cat_cols:
+            suggestions.append(f"מה הערכים הנפוצים ב-{cat_cols[0]}?")
+        if len(suggestions) < 4 and num_cols:
+            suggestions.append("הצג גרף עם התובנות המעניינות ביותר")
+    else:
+        suggestions.append("Give me an overview of the data")
+        if len(num_cols) >= 2:
+            suggestions.append(f"Correlation between {num_cols[0]} and {num_cols[1]}?")
+        if cat_cols and num_cols:
+            suggestions.append(f"Compare {num_cols[0]} by {cat_cols[0]}")
+        if date_cols and num_cols:
+            suggestions.append(f"Show {num_cols[0]} trend over time")
+        elif num_cols:
+            suggestions.append(f"Distribution of {num_cols[0]}?")
+        if cat_cols:
+            suggestions.append(f"Most common values in {cat_cols[0]}?")
+        if len(suggestions) < 4 and num_cols:
+            suggestions.append("Show a chart with the most interesting insights")
+
+    return suggestions[:5]
+
+
+def _render_quick_chips(T: dict, context_aware: bool = False) -> None:
+    """Row of quick-question chip buttons shown after the last AI reply.
+    Auto-dismisses when the user clicks one (chips_hidden flag)."""
+    # Dismissed after a chip click; re-shown after next AI reply
+    if st.session_state.get("chips_hidden"):
+        return
+    qs = _build_context_chips(T) if context_aware else T.get("quick_qs", [])[:5]
     if not qs:
         return
     st.markdown(
         f'<div class="chips-label">{T["quick_chips_lbl"]}</div>',
         unsafe_allow_html=True,
     )
-    cols = st.columns(len(qs))
+    cols = st.columns(min(len(qs), 3))
     for i, q in enumerate(qs):
-        with cols[i]:
+        with cols[i % len(cols)]:
             if st.button(q, key=f"chip_q_{i}", use_container_width=True):
                 st.session_state.pending_input = q
+                st.session_state.chips_hidden = True   # ← auto-dismiss
                 st.rerun()
+
+
+# ─── Conversation Persistence ─────────────────────────────────────────────────
+
+_CHATS_DIR = Path(__file__).parent / "chats"
+_CHATS_DIR.mkdir(exist_ok=True)
+
+
+def _chat_path(chat_id: str) -> Path:
+    return _CHATS_DIR / f"{chat_id}.json"
+
+
+def _new_chat_id() -> str:
+    import uuid as _uuid
+    ts = int(datetime.datetime.now().timestamp())
+    uid = _uuid.uuid4().hex[:8]
+    return f"{ts}_{uid}"
+
+
+def _save_chat(chat_id: str, messages: list, name: str) -> None:
+    """Persist current conversation to disk."""
+    import json as _json
+    p = _chat_path(chat_id)
+    existing: dict = {}
+    if p.exists():
+        try:
+            existing = _json.loads(p.read_text(encoding="utf-8"))
+        except Exception:
+            pass
+    data = {
+        "id":         chat_id,
+        "name":       name[:60],
+        "messages":   messages,
+        "created_at": existing.get(
+            "created_at",
+            datetime.datetime.now().isoformat(timespec="seconds"),
+        ),
+        "updated_at": datetime.datetime.now().isoformat(timespec="seconds"),
+    }
+    p.write_text(_json.dumps(data, ensure_ascii=False, indent=2), encoding="utf-8")
+
+
+def _list_chats() -> list:
+    """Return all saved chats sorted by updated_at descending."""
+    import json as _json
+    chats = []
+    for f in sorted(
+        _CHATS_DIR.glob("*.json"),
+        key=lambda x: x.stat().st_mtime,
+        reverse=True,
+    ):
+        try:
+            d = _json.loads(f.read_text(encoding="utf-8"))
+            chats.append(d)
+        except Exception:
+            pass
+    return chats
+
+
+def _load_chat(chat_id: str):
+    """Load a saved chat from disk. Returns None if not found."""
+    import json as _json
+    p = _chat_path(chat_id)
+    if not p.exists():
+        return None
+    try:
+        return _json.loads(p.read_text(encoding="utf-8"))
+    except Exception:
+        return None
+
+
+def _delete_chat(chat_id: str) -> None:
+    p = _chat_path(chat_id)
+    if p.exists():
+        p.unlink()
 
 
 # ─── Sidebar ──────────────────────────────────────────────────────────────────
 def render_sidebar(T: dict) -> None:
     with st.sidebar:
-        # ── Language toggle ────────────────────────────────────────────────
-        if st.button(T["lang_btn"], use_container_width=False, key="lang_toggle"):
+        # ── "New Conversation" button ──────────────────────────────────────
+        if st.button(
+            T["new_conv_btn"],
+            use_container_width=True,
+            key="new_conv_btn_sidebar",
+            type="primary",
+        ):
+            st.session_state.messages = []
+            st.session_state.chat = None
+            st.session_state.current_chat_id = None
+            st.session_state.chips_hidden = False
+            st.rerun()
+
+        st.markdown("---")
+
+        # ── Conversations ─────────────────────────────────────────────────
+        st.markdown(
+            f'<div class="conv-section-hdr">{T["conv_history_hdr"]}</div>',
+            unsafe_allow_html=True,
+        )
+
+        _saved_chats = _list_chats()
+        if not _saved_chats:
+            st.caption(T["no_saved_chats"])
+        else:
+            _today = datetime.date.today()
+            _today_chats = []
+            _earlier_chats = []
+            for _c in _saved_chats:
+                try:
+                    _upd = datetime.datetime.fromisoformat(_c.get("updated_at", "")).date()
+                    if _upd == _today:
+                        _today_chats.append(_c)
+                    else:
+                        _earlier_chats.append(_c)
+                except Exception:
+                    _earlier_chats.append(_c)
+
+            def _render_chat_list(chat_list: list, group_key: str) -> None:
+                for _ci, _ch in enumerate(chat_list):
+                    _cid  = _ch.get("id", "")
+                    _name = _ch.get("name", _cid) or _cid
+                    _is_active = _cid == st.session_state.current_chat_id
+                    _active_cls = " active" if _is_active else ""
+
+                    # Row: name button + delete button
+                    _col_name, _col_del = st.columns([9, 1])
+                    with _col_name:
+                        _btn_label = _name[:38] + ("…" if len(_name) > 38 else "")
+                        if st.button(
+                            _btn_label,
+                            key=f"conv_load_{group_key}_{_ci}",
+                            use_container_width=True,
+                            help=_name,
+                        ):
+                            _loaded = _load_chat(_cid)
+                            if _loaded:
+                                st.session_state.messages = _loaded.get("messages", [])
+                                st.session_state.current_chat_id = _cid
+                                st.session_state.chat = None   # fresh AI context
+                                st.session_state.chat_just_loaded = True
+                                st.session_state.chips_hidden = False
+                                st.rerun()
+                    with _col_del:
+                        if st.button(
+                            T["del_chat_btn"],
+                            key=f"conv_del_{group_key}_{_ci}",
+                            help=T["del_chat_help"],
+                        ):
+                            _delete_chat(_cid)
+                            if st.session_state.current_chat_id == _cid:
+                                st.session_state.messages = []
+                                st.session_state.chat = None
+                                st.session_state.current_chat_id = None
+                            st.rerun()
+
+                    # Highlight active chat with CSS class via custom HTML
+                    if _is_active:
+                        st.markdown(
+                            '<div class="conv-active-indicator"></div>',
+                            unsafe_allow_html=True,
+                        )
+
+            if _today_chats:
+                st.markdown(
+                    f'<div class="conv-group-label">{T["chat_date_today"]}</div>',
+                    unsafe_allow_html=True,
+                )
+                _render_chat_list(_today_chats, "today")
+
+            if _earlier_chats:
+                st.markdown(
+                    f'<div class="conv-group-label">{T["chat_date_earlier"]}</div>',
+                    unsafe_allow_html=True,
+                )
+                _render_chat_list(_earlier_chats, "earlier")
+
+        st.markdown("---")
+
+        # ── Language toggle (standalone) ──────────────────────────────────
+        if st.button(T["lang_btn"], use_container_width=True, key="lang_toggle"):
             st.session_state.lang = "en" if st.session_state.lang == "he" else "he"
             st.rerun()
 
-        st.markdown("---")
-
-        # ── AI Provider ────────────────────────────────────────────────────
-        render_provider_section(T)
-
-        st.markdown("---")
-
-        # ── Dataset badge (compact, read-only) ────────────────────────────
-        df = tools.get_dataframe()
-        if df is not None:
-            name = tools.get_data_name() or "dataset"
-            st.markdown(
-                f'<div class="api-badge-ok">📊 {name} · '
-                f'{len(df):,} {T["ds_rows"]} · {len(df.columns)} {T["ds_cols"]}</div>',
-                unsafe_allow_html=True,
-            )
-            with st.expander(T["columns_expander"], expanded=False):
-                for col in df.columns:
-                    dtype = str(df[col].dtype)
-                    null_pct = df[col].isna().mean() * 100
-                    null_str = f" ⚠️{null_pct:.0f}%" if null_pct > 0 else ""
-                    st.caption(f"`{col}` — {dtype}{null_str}")
-            st.markdown("---")
-
-        st.markdown("---")
-
-        # ── AI Chart Style ─────────────────────────────────────────────────
-        _STYLES  = ["whitegrid", "darkgrid", "white", "ticks"]
-        _PALETTES = ["husl", "deep", "muted", "Set2", "tab10", "viridis", "rocket"]
-        _SIZES   = {"10×5": (10, 5), "12×6": (12, 6), "8×4": (8, 4), "14×7": (14, 7)}
-        with st.expander(T["chart_settings_hdr"], expanded=False):
-            style_val = st.selectbox(
-                T["chart_seaborn_style"], _STYLES,
-                index=_STYLES.index(st.session_state.chart_seaborn_style),
-                key="chart_style_sel",
-            )
-            pal_val = st.selectbox(
-                T["chart_ai_palette"], _PALETTES,
-                index=_PALETTES.index(st.session_state.chart_ai_palette),
-                key="chart_pal_sel",
-            )
-            size_lbl = st.selectbox(
-                T["chart_figsize"], list(_SIZES.keys()),
-                index=list(_SIZES.keys()).index(st.session_state.chart_figsize_lbl),
-                key="chart_size_sel",
-            )
-            st.session_state.chart_seaborn_style = style_val
-            st.session_state.chart_ai_palette = pal_val
-            st.session_state.chart_figsize_lbl = size_lbl
-            tools.set_chart_style(
-                seaborn_style=style_val,
-                palette=pal_val,
-                figsize=_SIZES[size_lbl],
-            )
-
-        st.markdown("---")
-
-        # ── Email ──────────────────────────────────────────────────────────
-        with st.expander(T["email_hdr"], expanded=False):
-            st.caption(T["email_hint"])
-            _efrom = st.text_input(
-                T["email_from"], value=st.session_state.email_from,
-                key="email_from_inp", placeholder="you@gmail.com",
-            )
-            _epwd = st.text_input(
-                T["email_password"], value="",
-                type="password", key="email_pwd_inp",
-                placeholder="xxxx xxxx xxxx xxxx",
-            )
-            _eto = st.text_input(
-                T["email_to"], value=st.session_state.email_to,
-                key="email_to_inp", placeholder="recipient@example.com",
-            )
-            _esubj = st.text_input(
-                T["email_subject"], value=st.session_state.email_subject,
-                key="email_subj_inp",
-            )
-            _ewhat = st.radio(
-                T["email_what"],
-                options=["html", "csv"],
-                format_func=lambda x: T["email_what_html"] if x == "html" else T["email_what_csv"],
-                horizontal=True, key="email_what_radio",
-            )
-            if st.button(T["email_send"], use_container_width=True, key="email_send_btn"):
-                # Persist non-sensitive fields
-                st.session_state.email_from = _efrom
-                st.session_state.email_to = _eto
-                st.session_state.email_subject = _esubj
-                st.session_state.email_what = _ewhat
-                _df_now = tools.get_dataframe()
-                try:
-                    if _ewhat == "html":
-                        if not st.session_state.messages:
-                            st.warning(T["email_no_chat"])
-                        else:
-                            _body = export_chat_html(st.session_state.messages, T["page_title"]).decode("utf-8")
-                            send_email_smtp(_efrom, _epwd, _eto, _esubj or T["page_title"], body_html=_body)
-                            st.success(T["email_sent_ok"])
-                    else:
-                        if _df_now is None:
-                            st.warning(T["email_no_data"])
-                        else:
-                            _csv_bytes = _df_now.to_csv(index=False).encode("utf-8-sig")
-                            send_email_smtp(
-                                _efrom, _epwd, _eto, _esubj or T["page_title"],
-                                attachment_bytes=_csv_bytes, attachment_name="data.csv",
-                            )
-                            st.success(T["email_sent_ok"])
-                except Exception as _ex:
-                    st.error(T["email_sent_err"].format(err=str(_ex)))
-
-        st.markdown("---")
-
-        # ── What's New (Technical Writer) ──────────────────────────────────
-        _cl_path = Path(__file__).parent / "CHANGELOG.md"
-        if _cl_path.exists():
-            with st.expander(T["whats_new_hdr"], expanded=False):
-                _cl_lines = _cl_path.read_text(encoding="utf-8").splitlines()
-                # Extract the first versioned section (between first ## and second ##)
-                _section, _in = [], False
-                for _line in _cl_lines:
-                    if _line.startswith("## [") and not _line.startswith("## [Unreleased]"):
-                        if _in:
-                            break
-                        _in = True
-                    if _in:
-                        _section.append(_line)
-                st.markdown("\n".join(_section[:30]))
-
-        st.markdown("---")
-
-        # ── Clear ──────────────────────────────────────────────────────────
-        if st.button(T["clear_btn"], use_container_width=True):
-            st.session_state.messages = []
-            st.session_state.chat = None   # rebuilt lazily
+        # ── Theme toggle ─────────────────────────────────────────────────
+        _theme_label = T["theme_btn_light"] if st.session_state.theme == "dark" else T["theme_btn_dark"]
+        if st.button(_theme_label, use_container_width=True, key="theme_toggle"):
+            st.session_state.theme = "light" if st.session_state.theme == "dark" else "dark"
             st.rerun()
+
+
+# ─── Action Icon Bar (export + code toggle) ──────────────────────────────────
+def _render_action_icons(T: dict) -> None:
+    """Compact icon bar: export downloads + code-panel toggle."""
+    msgs = st.session_state.messages
+    if not msgs:
+        return
+    _has_charts = any(msg.get("charts") for msg in msgs)
+    _has_code = any(msg.get("code_snippets") for msg in msgs)
+    _tc = THEME_COLORS[st.session_state.theme]
+    with st.container():
+        st.markdown(f"""<span id="action-icons-bar"></span>
+<style>
+div[data-testid="stLayoutWrapper"]:has(#action-icons-bar) div[data-testid="stVerticalBlock"] {{
+    gap: 0 !important;
+}}
+div[data-testid="stLayoutWrapper"]:has(#action-icons-bar) .stDownloadButton button,
+div[data-testid="stLayoutWrapper"]:has(#action-icons-bar) .stButton button {{
+    padding: 6px 10px !important;
+    min-height: unset !important;
+    height: 36px !important;
+    width: 36px !important;
+    background-color: transparent !important;
+    background: transparent !important;
+    border: none !important;
+    border-radius: 8px !important;
+    font-size: 1.15rem !important;
+    color: {_tc['text-tertiary']} !important;
+    box-shadow: none !important;
+    outline: none !important;
+    cursor: pointer !important;
+}}
+div[data-testid="stLayoutWrapper"]:has(#action-icons-bar) .stDownloadButton button:hover,
+div[data-testid="stLayoutWrapper"]:has(#action-icons-bar) .stButton button:hover {{
+    background-color: {_tc['bg-hover']} !important;
+    color: {_tc['text-primary']} !important;
+}}
+div[data-testid="stLayoutWrapper"]:has(#action-icons-bar) .stDownloadButton svg {{
+    display: none !important;
+}}
+div[data-testid="stLayoutWrapper"]:has(#action-icons-bar) .stDownloadButton button div {{
+    gap: 0 !important;
+}}
+div[data-testid="stLayoutWrapper"]:has(#action-icons-bar) div[data-testid="stHorizontalBlock"] {{
+    gap: 0.3rem !important;
+}}
+div[data-testid="stLayoutWrapper"]:has(#action-icons-bar) div[data-testid="stColumn"] {{
+    padding: 0 !important; min-width: 0 !important; flex: 0 0 auto !important; width: auto !important;
+}}
+div[data-testid="stLayoutWrapper"]:has(#action-icons-bar) button:disabled {{
+    color: {_tc['text-disabled']} !important; opacity: 0.4 !important;
+}}
+div[data-testid="stLayoutWrapper"]:has(#action-icons-bar) iframe {{
+    border: none !important; background: transparent !important;
+    height: 42px !important; width: 42px !important;
+}}
+</style>""", unsafe_allow_html=True)
+        _ic = st.columns([1, 1, 1, 1, 1, 1, 15], gap="small")
+        with _ic[0]:
+            try:
+                _d = export_chat_html(st.session_state.messages, T["page_title"]) or b""
+            except Exception:
+                _d = b""
+            if _d:
+                st.download_button("📄", data=_d, file_name="chat_export.html",
+                                   mime="text/html", help=T["export_chat_help"],
+                                   key="export_chat_btn")
+            else:
+                st.button("📄", disabled=True, help=T["export_chat_help"],
+                          key="export_html_dis")
+        with _ic[1]:
+            try:
+                _d = export_chat_pdf(st.session_state.messages, T["page_title"]) or b""
+            except Exception:
+                _d = b""
+            if _d:
+                st.download_button("📑", data=_d, file_name="chat_export.pdf",
+                                   mime="application/pdf", help=T["export_pdf_help"],
+                                   key="export_pdf_btn")
+            else:
+                st.button("📑", disabled=True, help=T["export_pdf_help"],
+                          key="export_pdf_dis")
+        with _ic[2]:
+            try:
+                _d = export_report_html(st.session_state.messages, T["page_title"]) or b""
+            except Exception:
+                _d = b""
+            if _d:
+                st.download_button("📊", data=_d, file_name="analysis_report.html",
+                                   mime="text/html", help=T["export_report_help"],
+                                   key="export_report_btn")
+            else:
+                st.button("📊", disabled=True, help=T["export_report_help"],
+                          key="export_report_dis")
+        with _ic[3]:
+            try:
+                _d = export_ai_charts_zip(st.session_state.messages) if _has_charts else b""
+            except Exception:
+                _d = b""
+            if _d:
+                st.download_button("🖼", data=_d, file_name="ai_charts.zip",
+                                   mime="application/zip", help=T["export_ai_charts_help"],
+                                   key="export_charts_btn")
+            else:
+                st.button("🖼", disabled=True, help=T["export_ai_charts_help"],
+                          key="export_charts_dis")
+        with _ic[4]:
+            if _has_code:
+                _code_icon = "💻" if st.session_state.show_code_panels else "💻"
+                if st.button(_code_icon, help=T["code_toggle_help"],
+                             key="toggle_code_btn"):
+                    st.session_state.show_code_panels = not st.session_state.show_code_panels
+                    st.rerun()
+        with _ic[5]:
+            # Copy last assistant response to clipboard via inline HTML component
+            import json as _json
+            _last_asst = next(
+                (m["content"] for m in reversed(msgs)
+                 if m["role"] == "assistant" and not m.get("is_system")),
+                None,
+            )
+            if _last_asst:
+                _escaped = _json.dumps(_last_asst)
+                import streamlit.components.v1 as _components
+                _components.html(f"""
+<style>
+*{{ margin:0; padding:0; }}
+body{{ background:transparent; overflow:hidden; }}
+button#cpbtn{{
+    padding:6px 10px; height:36px; width:36px;
+    background:transparent; border:none; border-radius:8px;
+    font-size:1.15rem; color:{_tc['text-tertiary']}; cursor:pointer; line-height:1;
+}}
+button#cpbtn:hover{{ background:{_tc['bg-hover']}; color:{_tc['text-primary']}; }}
+</style>
+<button id="cpbtn" title="{T['copy_response_help']}" onclick="copyText()">📋</button>
+<script>
+function copyText(){{
+  var txt={_escaped};
+  if(navigator.clipboard && window.isSecureContext){{
+    navigator.clipboard.writeText(txt).then(ok,fb);
+  }} else {{ fb(); }}
+  function fb(){{
+    var ta=document.createElement('textarea');
+    ta.value=txt; ta.style.position='fixed'; ta.style.opacity='0';
+    document.body.appendChild(ta); ta.select();
+    try{{ document.execCommand('copy'); ok(); }}catch(e){{}}
+    document.body.removeChild(ta);
+  }}
+  function ok(){{
+    var b=document.getElementById('cpbtn');
+    b.textContent='✅';
+    setTimeout(function(){{ b.textContent='📋'; }},1500);
+  }}
+}}
+</script>
+""", height=42)
+            else:
+                st.button("📋", disabled=True, help=T["copy_response_help"],
+                          key="copy_resp_dis")
 
 
 # ─── Chat History ─────────────────────────────────────────────────────────────
@@ -2016,14 +3639,48 @@ def render_history() -> None:
                             })
                         st.toast(T["chart_added_from_chat"])
 
-            # ── Code snippets ─────────────────────────────────────────────
-            for snippet in msg.get("code_snippets", []):
-                with st.expander(T["show_code"], expanded=False):
-                    st.code(snippet, language="python")
+            # ── Code panel (analysis + chart tabs) ───────────────────────
+            _snippets = msg.get("code_snippets", [])
+            if _snippets and st.session_state.get("show_code_panels", True):
+                # Normalise: support legacy str format and new dict format
+                _analysis = [
+                    (s["code"] if isinstance(s, dict) else s)
+                    for s in _snippets
+                    if not isinstance(s, dict) or s.get("type") == "analysis"
+                ]
+                _charts_code = [
+                    s["code"]
+                    for s in _snippets
+                    if isinstance(s, dict) and s.get("type") == "chart"
+                ]
+                with st.expander(T["code_panel_lbl"], expanded=True):
+                    st.caption(T["code_panel_hint"])
+                    if _analysis and _charts_code:
+                        # Two tabs: data query + chart code
+                        _tab_a, _tab_c = st.tabs(
+                            [T["code_tab_analysis"], T["code_tab_chart"]]
+                        )
+                        with _tab_a:
+                            for _snip in _analysis:
+                                st.code(_snip, language="python")
+                        with _tab_c:
+                            for _snip in _charts_code:
+                                st.code(_snip, language="python")
+                    elif _analysis:
+                        for _snip in _analysis:
+                            st.code(_snip, language="python")
+                    else:
+                        for _snip in _charts_code:
+                            st.code(_snip, language="python")
 
-        # ── Quick-question chips (after the last real AI reply) ───────────
-        if msg_idx == last_asst_idx:
-            _render_quick_chips(T)
+        # ── Action icons + Quick-question chips ──────────────────────────
+        _show_bottom = (
+            (msg.get("is_system") and last_asst_idx == -1)
+            or msg_idx == last_asst_idx
+        )
+        if _show_bottom:
+            _render_action_icons(T)
+            _render_quick_chips(T, context_aware=True)
 
 
 # ─── Main ──────────────────────────────────────────────────────────────────────
@@ -2031,7 +3688,39 @@ def main() -> None:
     init_state()
     lang = st.session_state.lang
     T = TEXT[lang]
-    inject_css(lang)
+
+    # Restore tools._df from session-state cache after module reload
+    # (tools._df is module-level and resets to None on Streamlit file-change reruns)
+    if st.session_state.get("data_loaded") and tools.get_dataframe() is None:
+        _cached_df = st.session_state.get("_summary_df")
+        if _cached_df is not None:
+            _cached_name = st.session_state.get("_summary_name") or "dataset"
+            tools.set_dataframe(_cached_df, _cached_name)
+        else:
+            # Truly lost — reset so the UI is consistent
+            st.session_state.data_loaded = False
+
+    # Restore AI dashboard charts from session state after module reload
+    if st.session_state.get("ai_dashboard_charts") and not tools.get_ai_dashboard_charts():
+        tools._ai_dashboard_charts = list(st.session_state.ai_dashboard_charts)
+
+    # Regenerate the dataset-summary system message if language changed since it was created
+    if (
+        st.session_state.get("data_loaded")
+        and st.session_state.get("_summary_lang") != lang
+        and st.session_state.messages
+        and st.session_state.messages[0].get("is_system")
+    ):
+        # Use session-state-cached df (survives module reloads; tools._df is module-level)
+        _df = st.session_state.get("_summary_df")
+        if _df is None:
+            _df = tools.get_dataframe()
+        if _df is not None:
+            _ds_name = st.session_state.get("_summary_name") or tools.get_data_name() or "dataset"
+            st.session_state.messages[0]["content"] = _make_dataset_summary(_df, _ds_name, T)
+            st.session_state._summary_lang = lang
+
+    inject_css(lang, theme=st.session_state.theme)
     # Skip-to-main link for keyboard / screen-reader users
     st.markdown(
         f'''<a class="skip-link" href="#main-content"
@@ -2053,20 +3742,11 @@ def main() -> None:
                 st.rerun()
 
     # ── Header ────────────────────────────────────────────────────────────
-    col_title, col_badge = st.columns([5, 1])
-    with col_title:
-        st.markdown(f"""
+    st.markdown(f"""
 <div class="app-header">
   <div class="app-title">{T["page_title"]}</div>
   <div class="app-sub">{T["page_sub"]}</div>
 </div>""", unsafe_allow_html=True)
-    with col_badge:
-        st.markdown("<br>", unsafe_allow_html=True)
-        if st.session_state.get("provider", "anthropic") == "ollama":
-            _badge = st.session_state.get("ollama_model") or "🦙 ollama"
-        else:
-            _badge = "claude-opus-4-6"
-        st.caption(_badge)
 
     # ── Sidebar ───────────────────────────────────────────────────────────
     render_sidebar(T)
@@ -2086,64 +3766,54 @@ def main() -> None:
     )
 
     # ── 2 Tabs ────────────────────────────────────────────────────────────
-    tab_chat, tab_dashboard = st.tabs([T["tab_chat"], T["tab_dashboard"]])
+    tab_chat, tab_ai_dash, tab_dashboard, tab_data = st.tabs([
+        T["tab_chat"], T["tab_ai_dashboard"], T["tab_dashboard"], T["tab_data"]
+    ])
 
     # ═══════════════════════════════════════════════════════════════════════
     # Tab 1 – AI Chat
     # ═══════════════════════════════════════════════════════════════════════
     with tab_chat:
-        if not st.session_state.data_loaded:
-            # ── STEP 0: no data yet → show inline upload ──────────────────
-            _render_inline_upload(T)
+        _onboard_step = _get_onboarding_step()
+        if _onboard_step != "done":
+            # ── Onboarding: guide user through setup via chat messages ────
+            _render_onboarding_chat(T)
         else:
-            # ── STEP 1+: data loaded → show conversation ──────────────────
+            # ── Normal chat: data loaded + AI ready ───────────────────────
+
+            # Dataset info badge (compact, inline)
+            _df_badge = tools.get_dataframe()
+            if _df_badge is not None:
+                _ds_name = tools.get_data_name() or "dataset"
+                st.caption(
+                    T["dataset_badge_tpl"].format(
+                        name=_ds_name,
+                        rows=len(_df_badge),
+                        cols=len(_df_badge.columns),
+                    )
+                )
+
+            # Chat-just-loaded banner
+            if st.session_state.get("chat_just_loaded"):
+                st.info(T["chat_loaded_note"])
+                st.session_state.chat_just_loaded = False
+
             render_history()
 
-            # ── Export expander (below history, out of the way) ───────────
-            _has_charts = any(msg.get("charts") for msg in st.session_state.messages)
-            with st.expander(T["exports_lbl"], expanded=False):
-                _ec1, _ec2, _ec3, _ec4 = st.columns(4)
-                with _ec1:
-                    st.download_button(
-                        T["export_chat"],
-                        data=export_chat_html(st.session_state.messages, T["page_title"]),
-                        file_name="chat_export.html",
-                        mime="text/html",
-                        help=T["export_chat_help"],
-                        use_container_width=True,
-                        key="export_chat_btn",
-                    )
-                with _ec2:
-                    st.download_button(
-                        T["export_pdf"],
-                        data=export_chat_pdf(st.session_state.messages, T["page_title"]),
-                        file_name="chat_export.pdf",
-                        mime="application/pdf",
-                        help=T["export_pdf_help"],
-                        use_container_width=True,
-                        key="export_pdf_btn",
-                    )
-                with _ec3:
-                    st.download_button(
-                        T["export_report"],
-                        data=export_report_html(st.session_state.messages, T["page_title"]),
-                        file_name="analysis_report.html",
-                        mime="text/html",
-                        help=T["export_report_help"],
-                        use_container_width=True,
-                        key="export_report_btn",
-                    )
-                with _ec4:
-                    st.download_button(
-                        T["export_ai_charts"],
-                        data=export_ai_charts_zip(st.session_state.messages),
-                        file_name="ai_charts.zip",
-                        mime="application/zip",
-                        help=T["export_ai_charts_help"],
-                        use_container_width=True,
-                        disabled=not _has_charts,
-                        key="export_charts_btn",
-                    )
+        # ── Recover from interrupted streaming ─────────────────────────
+        if st.session_state._is_streaming and st.session_state._streaming_target == "chat":
+            st.session_state._is_streaming = False
+            st.session_state._streaming_target = None
+            _partial = st.session_state._partial_response
+            if _partial:
+                st.session_state.messages.append({
+                    "role": "assistant",
+                    "content": _partial,
+                    "charts": [],
+                    "chart_configs": [],
+                    "code_snippets": [],
+                })
+                st.session_state._partial_response = ""
 
         # Resolve quick-question button presses
         pre_fill = st.session_state.pop("pending_input", None)
@@ -2159,10 +3829,10 @@ def main() -> None:
         )
 
         # Show contextual hint when chat input is disabled
-        if no_data:
-            st.caption(T["no_data_warn"])
-        elif no_key:
+        if no_key:
             st.caption(T["no_key_hint"])
+        elif no_data:
+            st.caption(T["no_data_warn"])
 
         # Guard: quick-question buttons must also respect disabled state
         final_input = (pre_fill if not (no_key or no_data) else None) or user_input
@@ -2195,14 +3865,83 @@ def main() -> None:
 
             _t0 = datetime.datetime.now()
             with st.chat_message("assistant"):
+                # ── Thinking indicator: animated dots until first token ────
+                _think_ph = st.empty()
+                _think_ph.markdown(
+                    "<div class='thinking-dots'>"
+                    "<span></span><span></span><span></span>"
+                    "</div>",
+                    unsafe_allow_html=True,
+                )
+                # Auto-scroll to show thinking dots
+                import streamlit.components.v1 as _components
+                _components.html("""<script>
+                    const m = window.parent.document.querySelector('[data-testid="stMainBlockContainer"]')
+                           || window.parent.document.querySelector('.main .block-container');
+                    if (m) m.scrollTop = m.scrollHeight;
+                </script>""", height=0)
+
+                _cleared = [False]
+
+                def _stream_with_clear():
+                    """Wrap the token stream: clears the placeholder on 1st chunk."""
+                    for _chunk in text_stream(st.session_state.chat, final_input):
+                        if not _cleared[0]:
+                            _think_ph.empty()
+                            _cleared[0] = True
+                        yield _chunk
+
+                # ── Streaming: manual loop with stop support ─────────
+                st.session_state._is_streaming = True
+                st.session_state._partial_response = ""
+                st.session_state._streaming_target = "chat"
+
+                # CSS: morph send button → stop button (red ■)
+                st.markdown("""<style>
+                .stChatInput button svg { display: none !important; }
+                .stChatInput button::before {
+                    content: "\\25A0"; font-size: 16px; line-height: 1; color: white;
+                }
+                .stChatInput button { background: #e74c3c !important; }
+                .stChatInput button:hover { background: #c0392b !important; }
+                </style>""", unsafe_allow_html=True)
+
+                # JS: auto-scroll + stop-button click handler
+                _components.html("""<script>
+                (function() {
+                    const parent = window.parent.document;
+                    function scrollToBottom() {
+                        const main = parent.querySelector('[data-testid="stMainBlockContainer"]')
+                                  || parent.querySelector('.main .block-container');
+                        if (main) main.scrollTop = main.scrollHeight;
+                    }
+                    scrollToBottom();
+                    const si = setInterval(scrollToBottom, 300);
+                    const btn = parent.querySelector('.stChatInput button');
+                    if (btn) {
+                        btn.addEventListener('click', function(e) {
+                            e.preventDefault(); e.stopPropagation();
+                            const sb = parent.querySelector('[data-testid="stStatusWidget"] button');
+                            if (sb) sb.click();
+                        });
+                    }
+                    setTimeout(() => clearInterval(si), 120000);
+                })();
+                </script>""", height=0)
+
+                _content_ph = st.empty()
                 try:
-                    full_text = st.write_stream(
-                        text_stream(st.session_state.chat, final_input)
-                    )
+                    full_text = _manual_stream(_stream_with_clear(), _content_ph)
                 except Exception as err:
-                    full_text = ""
-                    st.error(_friendly_error(err))
+                    if not _cleared[0]:
+                        _think_ph.empty()
+                    full_text = st.session_state._partial_response or ""
+                    if str(err) not in ("", "None"):
+                        st.error(_friendly_error(err))
                     _audit("CHAT_ERROR", str(err))
+                finally:
+                    st.session_state._is_streaming = False
+                    st.session_state._streaming_target = None
                 _elapsed = (datetime.datetime.now() - _t0).total_seconds()
                 chart_paths   = tools.get_pending_charts()
                 chart_configs = tools.get_pending_chart_configs()
@@ -2223,30 +3962,306 @@ def main() -> None:
                 "chart_configs": chart_configs,
                 "code_snippets": code_snippets,
             })
-            # Scroll to bottom so the new response is visible
-            st.markdown(
-                "<script>window.parent.document.querySelector("
-                "'[data-testid=\"stMain\"]').scrollTo(0,9999999);</script>",
-                unsafe_allow_html=True,
-            )
+            # Auto-save conversation to disk
+            _msgs = st.session_state.messages
+            _user_msgs = [m for m in _msgs if m["role"] == "user"]
+            if _user_msgs:
+                if not st.session_state.current_chat_id:
+                    st.session_state.current_chat_id = _new_chat_id()
+                _chat_name = _user_msgs[0]["content"][:60]
+                try:
+                    _save_chat(st.session_state.current_chat_id, _msgs, _chat_name)
+                except Exception as _save_err:
+                    _logger.warning("Chat save failed: %s", _save_err)
+            # Chips: re-show after each AI response
+            st.session_state.chips_hidden = False
+            # Rerun so render_history() re-renders with the new message
+            # (icons + chips appear after the last assistant reply)
+            st.rerun()
 
         elif final_input and not st.session_state.chat:
             st.warning(T["no_data_warn"])
 
     # ═══════════════════════════════════════════════════════════════════════
-    # Tab 2 – Dashboard  (chart builder + charts grid + data view)
+    # Tab 2 – AI Dashboard  (chat-driven dashboard builder)
+    # ═══════════════════════════════════════════════════════════════════════
+    with tab_ai_dash:
+        df_ai = tools.get_dataframe()
+        if df_ai is None:
+            st.info(T["ai_dash_no_data"])
+        else:
+            # ── Sync tools ↔ session state ────────────────────────────────
+            if tools.get_ai_dashboard_charts():
+                st.session_state.ai_dashboard_charts = tools.get_ai_dashboard_charts()
+            elif st.session_state.ai_dashboard_charts:
+                tools._ai_dashboard_charts = list(st.session_state.ai_dashboard_charts)
+
+            col_chat_ai, col_preview = st.columns([2, 3])
+
+            # ── LEFT COLUMN: Chat ─────────────────────────────────────────
+            with col_chat_ai:
+                # ── Recover from interrupted streaming ─────────────────
+                if st.session_state._is_streaming and st.session_state._streaming_target == "ai_dash":
+                    st.session_state._is_streaming = False
+                    st.session_state._streaming_target = None
+                    _partial = st.session_state._partial_response
+                    if _partial:
+                        st.session_state.ai_dash_messages.append({
+                            "role": "assistant", "content": _partial,
+                        })
+                        st.session_state._partial_response = ""
+                        st.session_state.ai_dashboard_charts = tools.get_ai_dashboard_charts()
+
+                # Render chat history
+                for _msg in st.session_state.ai_dash_messages:
+                    with st.chat_message(_msg["role"]):
+                        st.markdown(_msg["content"])
+
+                # Welcome message
+                if not st.session_state.ai_dash_messages:
+                    with st.chat_message("assistant"):
+                        st.markdown(T["ai_dash_welcome"])
+
+                # Chat input
+                if st.session_state.get("provider", "anthropic") == "ollama":
+                    _ai_no_key = not (st.session_state.ollama_available
+                                      and bool(st.session_state.ollama_model))
+                else:
+                    _ai_no_key = not bool(get_active_key())
+
+                _ai_dash_input = st.chat_input(
+                    T["ai_dash_input_ph"],
+                    disabled=_ai_no_key,
+                    key="ai_dash_chat_input",
+                )
+
+                if _ai_dash_input:
+                    # Ensure chat object exists
+                    if st.session_state.ai_dash_chat is None:
+                        st.session_state.ai_dash_chat = build_ai_dash_chat()
+
+                    # Display user message
+                    with st.chat_message("user"):
+                        st.markdown(_ai_dash_input)
+                    st.session_state.ai_dash_messages.append({
+                        "role": "user", "content": _ai_dash_input,
+                    })
+
+                    # Stream AI response
+                    with st.chat_message("assistant"):
+                        _think_ph2 = st.empty()
+                        _think_ph2.markdown(
+                            "<div class='thinking-dots'>"
+                            "<span></span><span></span><span></span></div>",
+                            unsafe_allow_html=True,
+                        )
+                        # Auto-scroll to thinking dots
+                        import streamlit.components.v1 as _components
+                        _components.html("""<script>
+                            const m = window.parent.document.querySelector('[data-testid="stMainBlockContainer"]')
+                                   || window.parent.document.querySelector('.main .block-container');
+                            if (m) m.scrollTop = m.scrollHeight;
+                        </script>""", height=0)
+
+                        _cleared2 = [False]
+
+                        def _ai_dash_stream():
+                            for _ch in text_stream(st.session_state.ai_dash_chat, _ai_dash_input):
+                                if not _cleared2[0]:
+                                    _think_ph2.empty()
+                                    _cleared2[0] = True
+                                yield _ch
+
+                        # ── Streaming: manual loop with stop support ─────
+                        st.session_state._is_streaming = True
+                        st.session_state._partial_response = ""
+                        st.session_state._streaming_target = "ai_dash"
+
+                        # CSS: morph send button → stop button (red ■)
+                        st.markdown("""<style>
+                        .stChatInput button svg { display: none !important; }
+                        .stChatInput button::before {
+                            content: "\\25A0"; font-size: 16px; line-height: 1; color: white;
+                        }
+                        .stChatInput button { background: #e74c3c !important; }
+                        .stChatInput button:hover { background: #c0392b !important; }
+                        </style>""", unsafe_allow_html=True)
+
+                        # JS: auto-scroll + stop-button click handler
+                        _components.html("""<script>
+                        (function() {
+                            const parent = window.parent.document;
+                            function scrollToBottom() {
+                                const main = parent.querySelector('[data-testid="stMainBlockContainer"]')
+                                          || parent.querySelector('.main .block-container');
+                                if (main) main.scrollTop = main.scrollHeight;
+                            }
+                            scrollToBottom();
+                            const si = setInterval(scrollToBottom, 300);
+                            const btn = parent.querySelector('.stChatInput button');
+                            if (btn) {
+                                btn.addEventListener('click', function(e) {
+                                    e.preventDefault(); e.stopPropagation();
+                                    const sb = parent.querySelector('[data-testid="stStatusWidget"] button');
+                                    if (sb) sb.click();
+                                });
+                            }
+                            setTimeout(() => clearInterval(si), 120000);
+                        })();
+                        </script>""", height=0)
+
+                        _content_ph2 = st.empty()
+                        try:
+                            _ai_dash_text = _manual_stream(_ai_dash_stream(), _content_ph2)
+                        except Exception as _err:
+                            if not _cleared2[0]:
+                                _think_ph2.empty()
+                            _ai_dash_text = st.session_state._partial_response or ""
+                            if str(_err) not in ("", "None"):
+                                st.error(_friendly_error(_err))
+                        finally:
+                            st.session_state._is_streaming = False
+                            st.session_state._streaming_target = None
+
+                    st.session_state.ai_dash_messages.append({
+                        "role": "assistant", "content": _ai_dash_text or "",
+                    })
+
+                    # Sync chart state from tools module into session state
+                    st.session_state.ai_dashboard_charts = tools.get_ai_dashboard_charts()
+                    st.rerun()
+
+                # Control buttons
+                _btn1, _btn2 = st.columns(2)
+                with _btn1:
+                    if st.button(T["ai_dash_clear_chat"], key="ai_dash_clr_chat",
+                                 use_container_width=True):
+                        st.session_state.ai_dash_messages = []
+                        st.session_state.ai_dash_chat = None
+                        st.rerun()
+                with _btn2:
+                    if st.button(T["ai_dash_clear"], key="ai_dash_clr_board",
+                                 use_container_width=True):
+                        st.session_state.ai_dashboard_charts = []
+                        tools.clear_ai_dashboard_charts()
+                        st.rerun()
+
+            # ── RIGHT COLUMN: Dashboard Preview ───────────────────────────
+            with col_preview:
+                _ai_charts = st.session_state.ai_dashboard_charts
+                if not _ai_charts:
+                    st.markdown(
+                        f"<div style='text-align:center;padding:80px 20px;opacity:0.5'>"
+                        f"<div style='font-size:3rem'>🤖</div>"
+                        f"<div style='font-size:1.2rem;margin-top:8px'>{T['ai_dash_empty_title']}</div>"
+                        f"<div style='font-size:0.9rem;margin-top:4px'>{T['ai_dash_empty_hint']}</div>"
+                        f"</div>",
+                        unsafe_allow_html=True,
+                    )
+                else:
+                    # Header row
+                    _h1, _h2, _h3, _h4 = st.columns([3, 2, 1, 1])
+                    with _h1:
+                        st.markdown(f"**{len(_ai_charts)} {T['ai_dash_charts_count']}**")
+                    with _h2:
+                        _ai_grid = st.radio(
+                            T["ai_dash_layout"], [1, 2, 3],
+                            horizontal=True, index=1,
+                            format_func=lambda x: f"{x} {T['dash_col_suffix']}",
+                            key="ai_dash_grid",
+                        )
+                    with _h3:
+                        _html_export = export_dashboard_html(
+                            _ai_charts, df_ai, T["tab_ai_dashboard"]
+                        )
+                        st.download_button(
+                            T["ai_dash_export"],
+                            data=_html_export.encode("utf-8"),
+                            file_name="ai_dashboard.html",
+                            mime="text/html",
+                            use_container_width=True,
+                            key="ai_dash_export_btn",
+                        )
+                    with _h4:
+                        if st.button(T["ai_dash_copy_to_manual"], key="ai_dash_copy",
+                                     use_container_width=True):
+                            st.session_state.dashboard_charts.extend(_ai_charts)
+                            st.toast(T["ai_dash_copied"])
+
+                    st.markdown("---")
+
+                    # Chart grid
+                    _i = 0
+                    while _i < len(_ai_charts):
+                        _cols = st.columns(_ai_grid)
+                        for _j in range(_ai_grid):
+                            _idx = _i + _j
+                            if _idx < len(_ai_charts):
+                                _c = _ai_charts[_idx]
+                                with _cols[_j]:
+                                    _lbl = _c.get("title") or f"{_c.get('type', 'Chart')} – {_c.get('x', '')}"
+                                    st.markdown(f"**{_lbl}**")
+                                    try:
+                                        _fig = build_chart(_c, df_ai, sample_size=_c.get("sample_size", 500))
+                                        st.plotly_chart(_fig, use_container_width=True,
+                                                        key=f"ai_dash_chart_{_idx}")
+                                    except Exception as _e:
+                                        st.error(f"Error: {_e}")
+                                    if st.button(
+                                        T["ai_dash_remove_chart"],
+                                        key=f"ai_rm_{_idx}",
+                                        use_container_width=True,
+                                    ):
+                                        st.session_state.ai_dashboard_charts.pop(_idx)
+                                        tools._ai_dashboard_charts = list(
+                                            st.session_state.ai_dashboard_charts
+                                        )
+                                        st.rerun()
+                        _i += _ai_grid
+
+    # ═══════════════════════════════════════════════════════════════════════
+    # Tab 3 – Dashboard  (chart builder + charts grid + data view)
     # ═══════════════════════════════════════════════════════════════════════
     with tab_dashboard:
         df_now = tools.get_dataframe()
         if df_now is None:
             st.info(T["no_data_warn"])
         else:
+            # ── AI Chart Style (collapsible) ──────────────────────────────
+            _STYLES   = ["whitegrid", "darkgrid", "white", "ticks"]
+            _PALETTES = ["husl", "deep", "muted", "Set2", "tab10", "viridis", "rocket"]
+            _SIZES    = {"10×5": (10, 5), "12×6": (12, 6), "8×4": (8, 4), "14×7": (14, 7)}
+            with st.expander(T["chart_settings_hdr"], expanded=False):
+                style_val = st.selectbox(
+                    T["chart_seaborn_style"], _STYLES,
+                    index=_STYLES.index(st.session_state.chart_seaborn_style),
+                    key="chart_style_sel",
+                )
+                pal_val = st.selectbox(
+                    T["chart_ai_palette"], _PALETTES,
+                    index=_PALETTES.index(st.session_state.chart_ai_palette),
+                    key="chart_pal_sel",
+                )
+                size_lbl = st.selectbox(
+                    T["chart_figsize"], list(_SIZES.keys()),
+                    index=list(_SIZES.keys()).index(st.session_state.chart_figsize_lbl),
+                    key="chart_size_sel",
+                )
+                st.session_state.chart_seaborn_style = style_val
+                st.session_state.chart_ai_palette    = pal_val
+                st.session_state.chart_figsize_lbl   = size_lbl
+                tools.set_chart_style(
+                    seaborn_style=style_val,
+                    palette=pal_val,
+                    figsize=_SIZES[size_lbl],
+                )
+
             # ── Chart Builder (collapsible) ────────────────────────────────
             with st.expander(T["chart_builder_hdr"], expanded=False):
                 num_c = df_now.select_dtypes(include="number").columns.tolist()
                 col_a, col_b, col_c = st.columns(3)
                 with col_a:
-                    chart_type_sel = st.selectbox(T["chart_type"], CHART_TYPES, key="cb_type")
+                    chart_type_sel = st.selectbox(T["chart_type"], _chart_types_for_lang(), key="cb_type")
                 with col_b:
                     x_col_sel = st.selectbox(T["chart_x"], df_now.columns.tolist(), key="cb_x")
                 with col_c:
@@ -2256,21 +4271,22 @@ def main() -> None:
                     color_sel = st.selectbox(T["chart_color_by"], ["—"] + df_now.columns.tolist(), key="cb_color")
                     chart_color = None if color_sel == "—" else color_sel
                 with col_e:
-                    palette_sel = st.selectbox(T["chart_palette"], list(COLOR_PALETTES.keys()), key="cb_palette")
+                    palette_sel = st.selectbox(T["chart_palette"], list(_palettes_for_lang().keys()), key="cb_palette")
                 with col_f:
                     chart_title_inp = st.text_input(
                         T["chart_title_lbl"], placeholder=T["chart_title_ph"], key="cb_title"
                     )
                 corr_method_val = "pearson"
-                if chart_type_sel == "Heatmap":
+                if chart_type_sel in ("Heatmap", "עמודות / Heatmap"):
+                    _corr_labels = (
+                        {"pearson": "Pearson", "spearman": "Spearman", "kendall": "Kendall"}
+                        if st.session_state.get("lang") == "en" else
+                        {"pearson": "פירסון (Pearson)", "spearman": "ספירמן (Spearman)", "kendall": "קנדל (Kendall)"}
+                    )
                     corr_method_val = st.selectbox(
                         T["chart_corr_method"],
                         ["pearson", "spearman", "kendall"],
-                        format_func=lambda x: {
-                            "pearson": "פירסון (Pearson)",
-                            "spearman": "ספירמן (Spearman)",
-                            "kendall": "קנדל (Kendall)",
-                        }[x],
+                        format_func=lambda x: _corr_labels[x],
                         key="cb_corr",
                     )
                 max_sample   = max(50, min(5_000, len(df_now)))
@@ -2293,10 +4309,14 @@ def main() -> None:
                     fig = build_chart(cfg, df_now, sample_size=chart_sample)
                     st.plotly_chart(fig, use_container_width=True, key="chart_preview")
                 except Exception as e:
-                    st.error(f"שגיאה ביצירת גרף: {e}")
-                if chart_type_sel not in ("Heatmap", "עוגה / Pie",
-                                          "היסטוגרמה / Histogram", "Box Plot"):
+                    st.error(f'{T["chart_builder_err"]}: {e}')
+                _no_sample = {"Heatmap", "Box Plot", "Pie", "Histogram",
+                              "עוגה / Pie", "היסטוגרמה / Histogram"}
+                if chart_type_sel not in _no_sample:
                     st.caption(T["chart_sample_note"].format(n=chart_sample, total=len(df_now)))
+                # ── Python code for this chart ──────────────────────────────
+                with st.expander(T["chart_code_label"], expanded=False):
+                    st.code(_build_chart_code(cfg, chart_sample), language="python")
                 if st.button(T["add_to_dash"], key="add_to_dashboard"):
                     cfg_to_save = {**cfg, "sample_size": chart_sample}
                     st.session_state.dashboard_charts.append(cfg_to_save)
@@ -2307,7 +4327,21 @@ def main() -> None:
 
             # ── Dashboard grid ─────────────────────────────────────────────
             if not st.session_state.dashboard_charts:
-                st.info(T["no_charts_hint"])
+                st.markdown(
+                    f"""
+<div class="dash-empty-state">
+  <div class="dash-empty-icon">📊</div>
+  <div class="dash-empty-title">{T["dash_empty_title"]}</div>
+  <div class="dash-empty-steps">
+    <div class="dash-step"><span class="step-num">1</span><span>{T["dash_empty_step1"]}</span></div>
+    <div class="dash-step"><span class="step-num">2</span><span>{T["dash_empty_step2"]}</span></div>
+    <div class="dash-step"><span class="step-num">3</span><span>{T["dash_empty_step3"]}</span></div>
+  </div>
+  <div class="dash-empty-tip">{T["dash_empty_tip"]}</div>
+</div>
+""",
+                    unsafe_allow_html=True,
+                )
             else:
                 hdr1, hdr2, hdr3, hdr4 = st.columns([3, 1, 1, 1])
                 with hdr1:
@@ -2366,63 +4400,68 @@ def main() -> None:
                                     st.rerun()
                     i += grid_cols
 
-            st.markdown("---")
 
-            # ── Data View (collapsible) ────────────────────────────────────
-            with st.expander(T["data_view_hdr"], expanded=False):
-                if st.session_state.data_warnings:
-                    with st.expander(
-                        f"⚠️ {len(st.session_state.data_warnings)} {T['data_warnings_hdr']}",
-                        expanded=True,
-                    ):
-                        for w in st.session_state.data_warnings:
-                            st.warning(w)
-                        if st.button(T["data_autofix_btn"], key="auto_fix_data"):
-                            fixed = auto_fix_dataframe(df_now)
-                            tools.set_dataframe(fixed, name=tools.get_data_name())
-                            st.session_state.data_warnings = []
-                            st.success(T["data_fixed"])
-                            st.rerun()
-                col1, col2 = st.columns(2)
-                with col1:
-                    search = st.text_input(
-                        T["data_search"], placeholder=T["data_search_ph"], key="data_search_input"
-                    )
-                with col2:
-                    filter_col = st.selectbox(
-                        T["data_filter_col"],
-                        [T["data_filter_all"]] + df_now.columns.tolist(),
-                        key="data_filter_col_sel",
-                    )
-                display_df = df_now.copy()
-                if search:
-                    if filter_col != T["data_filter_all"] and filter_col in display_df.columns:
-                        mask = display_df[filter_col].astype(str).str.contains(search, case=False, na=False)
-                    else:
-                        mask = display_df.astype(str).apply(
-                            lambda col: col.str.contains(search, case=False, na=False)
-                        ).any(axis=1)
-                    display_df = display_df[mask]
-                st.dataframe(display_df, use_container_width=True, height=400)
-                cap_col, dl_col = st.columns([4, 1])
-                with cap_col:
-                    st.caption(T["data_showing"].format(n=len(display_df), total=len(df_now)))
-                with dl_col:
-                    csv_bytes = display_df.to_csv(index=False).encode("utf-8-sig")
-                    st.download_button(
-                        label=T["export_csv"],
-                        data=csv_bytes,
-                        file_name=f"{tools.get_data_name() or 'data'}.csv",
-                        mime="text/csv",
-                        help=T["export_csv_help"],
-                        use_container_width=True,
-                    )
-                if st.checkbox(T["data_stats_chk"], key="data_stats_cb"):
-                    num_only = df_now.select_dtypes(include="number")
-                    if not num_only.empty:
-                        st.dataframe(num_only.describe().round(2), use_container_width=True)
-                    else:
-                        st.info(T["no_numeric_cols"])
+    # ═══════════════════════════════════════════════════════════════════════
+    # Tab 3 – Data View
+    # ═══════════════════════════════════════════════════════════════════════
+    with tab_data:
+        df_data = tools.get_dataframe()
+        if df_data is None:
+            st.info(T["no_data_warn"])
+        else:
+            if st.session_state.data_warnings:
+                with st.expander(
+                    f"⚠️ {len(st.session_state.data_warnings)} {T['data_warnings_hdr']}",
+                    expanded=True,
+                ):
+                    for w in st.session_state.data_warnings:
+                        st.warning(w)
+                    if st.button(T["data_autofix_btn"], key="auto_fix_data"):
+                        fixed = auto_fix_dataframe(df_data)
+                        tools.set_dataframe(fixed, name=tools.get_data_name())
+                        st.session_state.data_warnings = []
+                        st.success(T["data_fixed"])
+                        st.rerun()
+            col1, col2 = st.columns(2)
+            with col1:
+                search = st.text_input(
+                    T["data_search"], placeholder=T["data_search_ph"], key="data_search_input"
+                )
+            with col2:
+                filter_col = st.selectbox(
+                    T["data_filter_col"],
+                    [T["data_filter_all"]] + df_data.columns.tolist(),
+                    key="data_filter_col_sel",
+                )
+            display_df = df_data.copy()
+            if search:
+                if filter_col != T["data_filter_all"] and filter_col in display_df.columns:
+                    mask = display_df[filter_col].astype(str).str.contains(search, case=False, na=False)
+                else:
+                    mask = display_df.astype(str).apply(
+                        lambda col: col.str.contains(search, case=False, na=False)
+                    ).any(axis=1)
+                display_df = display_df[mask]
+            st.dataframe(display_df, use_container_width=True, height=400)
+            cap_col, dl_col = st.columns([4, 1])
+            with cap_col:
+                st.caption(T["data_showing"].format(n=len(display_df), total=len(df_data)))
+            with dl_col:
+                csv_bytes = display_df.to_csv(index=False).encode("utf-8-sig")
+                st.download_button(
+                    label=T["export_csv"],
+                    data=csv_bytes,
+                    file_name=f"{tools.get_data_name() or 'data'}.csv",
+                    mime="text/csv",
+                    help=T["export_csv_help"],
+                    use_container_width=True,
+                )
+            if st.checkbox(T["data_stats_chk"], key="data_stats_cb"):
+                num_only = df_data.select_dtypes(include="number")
+                if not num_only.empty:
+                    st.dataframe(num_only.describe().round(2), use_container_width=True)
+                else:
+                    st.info(T["no_numeric_cols"])
 
 if __name__ == "__main__":
     main()

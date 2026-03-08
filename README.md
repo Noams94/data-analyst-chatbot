@@ -105,6 +105,78 @@ pytest tests/ -v
 
 ---
 
+## Analysis Architecture
+
+### Tool Pipeline
+
+The AI uses **4 registered tools** via Claude's function-calling API (managed by `chatlas`):
+
+| # | Tool | Purpose |
+|---|------|---------|
+| 1 | `get_data_overview()` | Initial scan — schema, dtypes, nulls, stats, sample rows |
+| 2 | `run_analysis(pandas_code)` | Execute pandas / numpy code on the dataset |
+| 3 | `create_chart(...)` | Generate matplotlib + seaborn visualisations (PNG) |
+| 4 | `suggest_next_analyses()` | Propose smart follow-up questions |
+
+### Chain-of-Thought Process
+
+Every AI response follows a strict order enforced by the system prompt:
+
+1. **Understand** — call `get_data_overview()` to inspect the dataset structure
+2. **Compute** — call `run_analysis()` with pandas code to calculate exact numbers
+3. **Report** — write the answer using **only** numbers produced by the analysis
+4. **Visualise** — call `create_chart()` for every key finding
+
+### Code Execution — `run_analysis()`
+
+Uses a **split exec / eval** pattern in a sandboxed namespace:
+
+```python
+# Sandboxed namespace — only pandas, numpy, json + a copy of the data
+local_ns = {"df": _df.copy(), "pd": pd, "np": np, "json": json}
+
+# Execute all lines except the last
+exec("\n".join(lines[:-1]), local_ns)
+
+# Evaluate the last line to capture the result
+result = eval(lines[-1], local_ns)
+```
+
+- The DataFrame is **copied** before execution (original data is never mutated)
+- **No access** to the filesystem, network, or OS commands
+- Results are capped at **50 rows × 20 columns**
+- All executed code is saved and displayed to the user in the Code panel
+
+### Chart Generation — `create_chart()`
+
+**Supported chart types:** `bar` · `barh` · `line` · `scatter` · `hist` · `box` · `pie` · `heatmap` · `count`
+
+**Parameters:** `x_column`, `y_column`, `aggregation` (sum / mean / count / median / max / min), `color_column`, `top_n`, `bins`, `sort`
+
+- RTL (Hebrew) text rendered correctly via `python-bidi`
+- Charts saved as PNG to the `charts/` directory
+- Month-name axes are sorted chronologically
+
+### Guardrails
+
+The system prompt enforces strict rules:
+
+- **Never** fabricate or estimate numbers — only report computed results
+- **Never** modify, delete, or write back to the user's data
+- **Never** access external URLs, files, APIs, or OS commands
+- If unsure about a number → "I need to verify" + run additional code
+
+### Response Format
+
+Every AI response is structured as:
+
+1. **📊 Key Findings** — bullet points with exact numbers
+2. **🔍 Interpretation** — what the numbers mean in context
+3. **💡 Insight / Recommendation** — business or analytical conclusion
+4. **➡️ Follow-up** — 1–2 suggested next questions
+
+---
+
 ## Security Notes
 
 - API keys are stored **in-memory only** (session state) and never written to disk
