@@ -275,6 +275,8 @@ TEXT = {
         "copy_response_ok":      "הועתק!",
         "chart_code_label":      "📋 קוד Python של הגרף",
         "chart_builder_err":     "שגיאה ביצירת גרף",
+        "corr_matrix_title":     "מטריצת קורלציה",
+        "unknown_chart_type":    "סוג גרף לא מוכר",
         # sidebar redesign — conversation history
         "new_conv_btn":          "✏️ שיחה חדשה",
         "conv_history_hdr":      "📜 שיחות",
@@ -554,6 +556,8 @@ TEXT = {
         "copy_response_ok":      "Copied!",
         "chart_code_label":      "📋 Python chart code",
         "chart_builder_err":     "Error building chart",
+        "corr_matrix_title":     "Correlation Matrix",
+        "unknown_chart_type":    "Unknown chart type",
         # sidebar redesign — conversation history
         "new_conv_btn":          "✏️ New Conversation",
         "conv_history_hdr":      "📜 Conversations",
@@ -1186,11 +1190,11 @@ def build_chart(config: dict, df: pd.DataFrame, sample_size: int = 500) -> go.Fi
     seq      = palette["seq"]
     dfs      = df.head(sample_size)
 
-    # Extract base Hebrew type (handles "עמודות / Bar" → "עמודות" and "Box Plot" → "Box Plot")
-    t = chart_type.split(" / ")[0]
+    # Extract English type key (handles "עמודות / Bar" → "Bar" and "Box Plot" → "Box Plot")
+    t = chart_type.split(" / ")[-1]
 
     try:
-        if t == "עמודות":
+        if t == "Bar":
             if y_col and y_col != "—":
                 fig = px.bar(dfs, x=x_col, y=y_col, color=color,
                              color_discrete_sequence=seq, **common)
@@ -1200,27 +1204,27 @@ def build_chart(config: dict, df: pd.DataFrame, sample_size: int = 500) -> go.Fi
                 fig = px.bar(counts, x=x_col, y="count",
                              color_discrete_sequence=[single], **common)
 
-        elif t == "קו":
+        elif t == "Line":
             y = y_col if y_col and y_col != "—" else (num_cols[0] if num_cols else x_col)
             fig = px.line(dfs, x=x_col, y=y, color=color,
                           color_discrete_sequence=[single], **common)
 
-        elif t == "שטח":
+        elif t == "Area":
             y = y_col if y_col and y_col != "—" else (num_cols[0] if num_cols else x_col)
             fig = px.area(dfs, x=x_col, y=y, color=color,
                           color_discrete_sequence=[single], **common)
 
-        elif t == "עוגה":
+        elif t == "Pie":
             counts = df[x_col].value_counts().head(10).reset_index()
             counts.columns = [x_col, "count"]
             fig = px.pie(counts, names=x_col, values="count",
                          color_discrete_sequence=seq, **common)
 
-        elif t == "היסטוגרמה":
+        elif t == "Histogram":
             col = y_col if y_col and y_col != "—" else (num_cols[0] if num_cols else x_col)
             fig = px.histogram(df, x=col, color_discrete_sequence=[single], **common)
 
-        elif t == "פיזור":
+        elif t == "Scatter":
             y = (y_col if y_col and y_col != "—"
                  else (num_cols[1] if len(num_cols) > 1 else (num_cols[0] if num_cols else x_col)))
             fig = px.scatter(dfs, x=x_col, y=y, color=color,
@@ -1243,24 +1247,21 @@ def build_chart(config: dict, df: pd.DataFrame, sample_size: int = 500) -> go.Fi
             fig  = px.imshow(
                 corr,
                 color_continuous_scale=palette["scale"],
-                title=title or (f"Correlation Matrix ({corr_method})"
-                      if st.session_state.get("lang") == "en"
-                      else f"מטריצת קורלציה ({corr_method})"),
+                title=title or f'{TEXT[st.session_state.get("lang", "he")]["corr_matrix_title"]} ({corr_method})',
                 text_auto=True,
             )
 
         else:
             fig = go.Figure()
-            _unk = (f"Unknown chart type: {chart_type}"
-                    if st.session_state.get("lang") == "en"
-                    else f"סוג גרף לא מוכר: {chart_type}")
-            fig.add_annotation(text=_unk, showarrow=False)
+            _T = TEXT[st.session_state.get("lang", "he")]
+            fig.add_annotation(text=f'{_T["unknown_chart_type"]}: {chart_type}', showarrow=False)
 
         return apply_chart_style(fig, theme=st.session_state.get("theme", "dark"))
 
     except Exception as exc:
         err_fig = go.Figure()
-        err_fig.add_annotation(text=f"שגיאה ביצירת גרף: {exc}", showarrow=False,
+        _T = TEXT[st.session_state.get("lang", "he")]
+        err_fig.add_annotation(text=f'{_T["chart_builder_err"]}: {exc}', showarrow=False,
                                font={"color": "#c5221f"})
         return apply_chart_style(err_fig, theme=st.session_state.get("theme", "dark"))
 
@@ -1274,7 +1275,7 @@ def _build_chart_code(config: dict, sample_size: int = 500) -> str:
     title        = config.get("title", "")
     pal_name     = _norm_palette(config.get("palette", list(COLOR_PALETTES.keys())[0]))
     corr_method  = config.get("corr_method", "pearson")
-    t            = ct.split(" / ")[0]
+    t            = ct.split(" / ")[-1]
     palette      = COLOR_PALETTES.get(pal_name, list(COLOR_PALETTES.values())[0])
     single       = repr(palette["single"])
     _PAL_SEQ = {
@@ -1310,7 +1311,7 @@ def _build_chart_code(config: dict, sample_size: int = 500) -> str:
         "# df  ← your pandas DataFrame",
     ]
 
-    if t == "עמודות":
+    if t == "Bar":
         if y and y != "—":
             lines += [
                 f"dfs = df.head({sample_size})",
@@ -1324,34 +1325,34 @@ def _build_chart_code(config: dict, sample_size: int = 500) -> str:
                 f'fig = px.bar(counts, x="{x}", y="count",',
                 f'             color_discrete_sequence=[{single}]{title_arg})',
             ]
-    elif t == "קו":
+    elif t == "Line":
         y_use = y if y and y != "—" else x
         lines += [
             f"dfs = df.head({sample_size})",
             f'fig = px.line(dfs, x="{x}", y="{y_use}"{color_arg},',
             f'              color_discrete_sequence=[{single}]{title_arg})',
         ]
-    elif t == "שטח":
+    elif t == "Area":
         y_use = y if y and y != "—" else x
         lines += [
             f"dfs = df.head({sample_size})",
             f'fig = px.area(dfs, x="{x}", y="{y_use}"{color_arg},',
             f'              color_discrete_sequence=[{single}]{title_arg})',
         ]
-    elif t == "עוגה":
+    elif t == "Pie":
         lines += [
             f'counts = df["{x}"].value_counts().head(10).reset_index()',
             f'counts.columns = ["{x}", "count"]',
             f'fig = px.pie(counts, names="{x}", values="count",',
             f'             color_discrete_sequence={seq}{title_arg})',
         ]
-    elif t == "היסטוגרמה":
+    elif t == "Histogram":
         col = y if y and y != "—" else x
         lines += [
             f'fig = px.histogram(df, x="{col}",',
             f'                   color_discrete_sequence=[{single}]{title_arg})',
         ]
-    elif t == "פיזור":
+    elif t == "Scatter":
         y_use = y if y and y != "—" else x
         lines += [
             f"dfs = df.head({sample_size})",
@@ -4277,7 +4278,7 @@ def main() -> None:
                         T["chart_title_lbl"], placeholder=T["chart_title_ph"], key="cb_title"
                     )
                 corr_method_val = "pearson"
-                if chart_type_sel in ("Heatmap", "עמודות / Heatmap"):
+                if _norm_chart_type(chart_type_sel).split(" / ")[-1] == "Heatmap":
                     _corr_labels = (
                         {"pearson": "Pearson", "spearman": "Spearman", "kendall": "Kendall"}
                         if st.session_state.get("lang") == "en" else
@@ -4310,9 +4311,9 @@ def main() -> None:
                     st.plotly_chart(fig, use_container_width=True, key="chart_preview")
                 except Exception as e:
                     st.error(f'{T["chart_builder_err"]}: {e}')
-                _no_sample = {"Heatmap", "Box Plot", "Pie", "Histogram",
-                              "עוגה / Pie", "היסטוגרמה / Histogram"}
-                if chart_type_sel not in _no_sample:
+                _no_sample = {"Heatmap", "Box Plot", "Pie", "Histogram"}
+                _sel_eng = _norm_chart_type(chart_type_sel).split(" / ")[-1]
+                if _sel_eng not in _no_sample:
                     st.caption(T["chart_sample_note"].format(n=chart_sample, total=len(df_now)))
                 # ── Python code for this chart ──────────────────────────────
                 with st.expander(T["chart_code_label"], expanded=False):

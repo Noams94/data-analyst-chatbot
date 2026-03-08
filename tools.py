@@ -510,6 +510,19 @@ _PALETTE_MAP: dict[str, str] = {
     "pink":   "ורוד / Pink",
     "Teal":   "ציאן / Teal",
     "teal":   "ציאן / Teal",
+    "Sunset":  "שקיעה / Sunset",
+    "sunset":  "שקיעה / Sunset",
+    "Gray":    "אפור / Gray",
+    "gray":    "אפור / Gray",
+    "Magenta": "מג'נטה / Magenta",
+    "magenta": "מג'נטה / Magenta",
+    "RdBu":    "כחול-אדום / RdBu",
+    "Spectral": "חם-קר / Spectral",
+    "PRGn":    "ירוק-סגול / PRGn",
+    "Vivid":   "צבעוני / Vivid",
+    "Bold":    "בולד / Bold",
+    "Pastel":  "פסטל / Pastel",
+    "D3":      "D3 / D3",
 }
 
 
