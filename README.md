@@ -11,7 +11,7 @@ Upload a CSV, Excel, JSON, or Parquet file and ask questions in natural language
 | Feature | Description |
 |---|---|
 | 🤖 AI Chat | Ask questions in Hebrew or English; the bot runs pandas analyses and creates charts automatically |
-| 📊 Chart Builder | Interactive Plotly chart builder with 8 chart types and colour palettes |
+| 📊 Chart Builder | Interactive Plotly chart builder with 8 chart types and 16 colour palettes (sequential, diverging, qualitative) |
 | 📈 Dashboard | Collect charts into a customisable multi-column dashboard |
 | 🗂 Data View | Browse, search, filter, and auto-fix data quality issues |
 | 📤 Export | Download conversation as **HTML** or **PDF**, AI charts as **ZIP**, dashboard as interactive **HTML** |
@@ -99,7 +99,7 @@ pytest tests/ -v
 - **Frontend:** Streamlit
 - **AI:** chatlas + Anthropic Claude Opus 4.6 (or Ollama)
 - **Data:** pandas, numpy
-- **Charts:** matplotlib / seaborn (AI), Plotly (builder & dashboard)
+- **Charts:** matplotlib / seaborn (AI), Plotly (builder & dashboard) — animated entry, custom hover tooltips, dotted grids, donut pies, auto-rotated labels
 - **PDF:** fpdf2 + python-bidi (Hebrew RTL support)
 - **Email:** smtplib (stdlib)
 
@@ -156,6 +156,16 @@ result = eval(lines[-1], local_ns)
 - RTL (Hebrew) text rendered correctly via `python-bidi`
 - Charts saved as PNG to the `charts/` directory
 - Month-name axes are sorted chronologically
+
+### Dashboard Charts (Plotly)
+
+The interactive chart builder and dashboard use Plotly with a polished styling layer:
+
+- **16 colour palettes** — sequential (Purple, Blue, Green, Orange, Pink, Teal, Sunset, Gray, Magenta), diverging (RdBu, Spectral, PRGn), and qualitative (Vivid, Bold, Pastel, D3)
+- **Custom hover tooltips** — per-chart-type templates with thousands separators and RTL alignment
+- **Animated entry** — CSS fade-in on chart mount + Plotly transitions for data updates
+- **Modern styling** — dotted grid lines, horizontal legend, donut pies (hole=0.4), auto-rotated labels for 8+ categories, transparent legend, refined marker outlines
+- **Theme-aware** — all colours adapt to dark / light mode
 
 ### Guardrails
 
