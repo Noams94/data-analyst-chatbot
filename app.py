@@ -3598,11 +3598,11 @@ def render_sidebar(T: dict) -> None:
             st.session_state.lang = "en" if st.session_state.lang == "he" else "he"
             st.rerun()
 
-        # ── Theme toggle ─────────────────────────────────────────────────
-        _theme_label = T["theme_btn_light"] if st.session_state.theme == "dark" else T["theme_btn_dark"]
-        if st.button(_theme_label, use_container_width=True, key="theme_toggle"):
-            st.session_state.theme = "light" if st.session_state.theme == "dark" else "dark"
-            st.rerun()
+        # ── Theme toggle (disabled — dark-only for now; see README to re-enable) ──
+        # _theme_label = T["theme_btn_light"] if st.session_state.theme == "dark" else T["theme_btn_dark"]
+        # if st.button(_theme_label, use_container_width=True, key="theme_toggle"):
+        #     st.session_state.theme = "light" if st.session_state.theme == "dark" else "dark"
+        #     st.rerun()
 
 
 # ─── Action Icon Bar (export + code toggle) ──────────────────────────────────

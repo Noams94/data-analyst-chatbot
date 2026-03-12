@@ -18,7 +18,7 @@ Upload a CSV, Excel, JSON, or Parquet file and ask questions in natural language
 | Streaming Control | Live streaming with a stop button — cancel AI responses mid-stream |
 | Export | Download conversation as HTML or PDF, AI charts as ZIP, dashboard as interactive HTML |
 | Email | Send the conversation or data CSV via Gmail (App Password) |
-| Dark Mode | Automatically respects your OS colour-scheme preference |
+| Dark Mode | Dark theme by default (light mode is built-in but disabled — see [Enabling Light Mode](#enabling-light-mode)) |
 | Multi-Provider | Anthropic Claude, OpenAI, Google Gemini, Groq, or local Ollama |
 
 ---
@@ -199,6 +199,51 @@ The system prompt enforces strict rules:
 - User input is capped at **2,000 characters** per message
 - AI requests are rate-limited to **30 per session**
 - Files larger than **100,000 rows** are automatically sampled
+
+---
+
+## Enabling Light Mode
+
+The app ships in **dark-only mode**, but all light mode code is already built-in and ready to activate. To enable the light/dark theme toggle:
+
+### Step 1 — Uncomment the toggle button in `app.py`
+
+Search for `Theme toggle (disabled` (~line 3601) and uncomment the 4 lines:
+
+```python
+# Before (disabled):
+# _theme_label = T["theme_btn_light"] if st.session_state.theme == "dark" else T["theme_btn_dark"]
+# if st.button(_theme_label, use_container_width=True, key="theme_toggle"):
+#     st.session_state.theme = "light" if st.session_state.theme == "dark" else "dark"
+#     st.rerun()
+
+# After (enabled):
+_theme_label = T["theme_btn_light"] if st.session_state.theme == "dark" else T["theme_btn_dark"]
+if st.button(_theme_label, use_container_width=True, key="theme_toggle"):
+    st.session_state.theme = "light" if st.session_state.theme == "dark" else "dark"
+    st.rerun()
+```
+
+### Step 2 — Update `.streamlit/config.toml`
+
+Change the theme base and colours to light:
+
+```toml
+[theme]
+base                     = "light"
+primaryColor             = "#10a37f"
+backgroundColor          = "#ffffff"
+secondaryBackgroundColor = "#f5f5f5"
+textColor                = "#1a1a1a"
+```
+
+### Step 3 — Restart Streamlit
+
+```bash
+streamlit run app.py
+```
+
+A **☀️ Light Mode / 🌙 Dark Mode** toggle button will appear at the bottom of the sidebar. All colours, charts, and native components (including DataFrames) will adapt automatically.
 
 ---
 
