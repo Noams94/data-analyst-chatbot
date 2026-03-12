@@ -31,6 +31,7 @@ sys.path.insert(0, str(Path(__file__).parent))
 import tools
 import plotly.express as px
 import plotly.graph_objects as go
+from streamlit_sortables import sort_items
 
 # ─── Page Config ──────────────────────────────────────────────────────────────
 st.set_page_config(
@@ -164,6 +165,9 @@ TEXT = {
         "stats_tab_numeric":  "מספרי",
         "stats_tab_categ":    "קטגוריאלי",
         "no_categ_cols":      "אין עמודות קטגוריאליות",
+        "cat_sort_by":        "מיין לפי",
+        "cat_drag_hint":      "גרור לסידור מחדש",
+        "cat_exclude_lbl":    "הסר ערכים",
         "chart_added_total":  "סה\"כ {n} גרפים בדשבורד",
         "chat_error":         "❌ שגיאה בעיבוד השאלה",
         "export_csv":         "⬇️ ייצא CSV",
@@ -449,6 +453,9 @@ TEXT = {
         "stats_tab_numeric":  "Numeric",
         "stats_tab_categ":    "Categorical",
         "no_categ_cols":      "No categorical columns",
+        "cat_sort_by":        "Sort by",
+        "cat_drag_hint":      "Drag to reorder",
+        "cat_exclude_lbl":    "Exclude values",
         "chart_added_total":  "{n} charts in dashboard",
         "chat_error":         "❌ Error processing your question",
         "export_csv":         "⬇️ Export CSV",
@@ -4485,18 +4492,55 @@ def main() -> None:
                     else:
                         st.info(T["no_numeric_cols"])
                 with _tab_cat:
-                    if not cat_only.empty:
-                        for col in cat_only.columns:
+                    _cat_cols = [c for c in cat_only.columns if cat_only[c].nunique() > 1]
+                    if _cat_cols:
+                        for col in _cat_cols:
                             with st.expander(col, expanded=False):
-                                vc = cat_only[col].value_counts()
+                                # ── Exclude filter ──
+                                _all_vals = cat_only[col].dropna().unique().tolist()
+                                _all_vals_str = sorted([str(v) for v in _all_vals])
+                                _excluded = st.multiselect(
+                                    T["cat_exclude_lbl"], _all_vals_str,
+                                    key=f"cat_excl_{col}",
+                                )
+                                _filtered = cat_only[col][~cat_only[col].astype(str).isin(_excluded)]
+                                _total = len(_filtered)
+                                vc = _filtered.value_counts()
                                 if len(vc) > 30:
                                     vc = vc.head(30)
-                                freq_df = pd.DataFrame({
-                                    "Value": vc.index.astype(str),
-                                    "Count": vc.values,
-                                    "%": (vc.values / len(df_data) * 100).round(1),
-                                })
-                                st.dataframe(freq_df, use_container_width=True, hide_index=True)
+
+                                # Build items list
+                                freq_items = []
+                                for val, cnt in vc.items():
+                                    pct = round(cnt / _total * 100, 1) if _total > 0 else 0.0
+                                    freq_items.append({
+                                        "label": f"{val}  \u2014  {cnt:,}  \u2014  {pct}%",
+                                        "value": str(val), "count": cnt, "pct": pct,
+                                    })
+
+                                # ── Sort dropdown ──
+                                _sort_opts = ["Count", "Value", "%"]
+                                _sort_sel = st.selectbox(
+                                    T["cat_sort_by"], _sort_opts, key=f"cat_sort_{col}",
+                                )
+                                if _sort_sel == "Value":
+                                    freq_items.sort(key=lambda x: x["value"])
+                                elif _sort_sel == "%":
+                                    freq_items.sort(key=lambda x: x["pct"], reverse=True)
+
+                                # ── Drag-and-drop reorder ──
+                                if freq_items:
+                                    st.caption(T["cat_drag_hint"])
+                                    labels = [it["label"] for it in freq_items]
+                                    sorted_labels = sort_items(labels, key=f"drag_{col}")
+                                    lbl_map = {it["label"]: it for it in freq_items}
+                                    sorted_items = [lbl_map[lbl] for lbl in sorted_labels]
+                                    freq_df = pd.DataFrame({
+                                        "Value": [it["value"] for it in sorted_items],
+                                        "Count": [it["count"] for it in sorted_items],
+                                        "%": [it["pct"] for it in sorted_items],
+                                    })
+                                    st.dataframe(freq_df, use_container_width=True, hide_index=True)
                     else:
                         st.info(T["no_categ_cols"])
 
