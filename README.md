@@ -1,6 +1,6 @@
-# 🤖 Data Analyst Chatbot
+# Data Analyst Chatbot
 
-A bilingual (Hebrew / English) AI-powered data analysis tool built with **Streamlit** and **Claude Opus 4.6** (or local **Ollama** models).
+A bilingual (Hebrew / English) AI-powered data analysis tool built with **Streamlit** and multi-provider LLM support.
 
 Upload a CSV, Excel, JSON, or Parquet file and ask questions in natural language — the bot generates charts, summaries, and interactive dashboards.
 
@@ -10,20 +10,34 @@ Upload a CSV, Excel, JSON, or Parquet file and ask questions in natural language
 
 | Feature | Description |
 |---|---|
-| 🤖 AI Chat | Ask questions in Hebrew or English; the bot runs pandas analyses and creates charts automatically |
-| 📊 Chart Builder | Interactive Plotly chart builder with 8 chart types and 16 colour palettes (sequential, diverging, qualitative) |
-| 📈 Dashboard | Collect charts into a customisable multi-column dashboard |
-| 🗂 Data View | Browse, search, filter, and auto-fix data quality issues |
-| 📤 Export | Download conversation as **HTML** or **PDF**, AI charts as **ZIP**, dashboard as interactive **HTML** |
-| 📧 Email | Send the conversation or data CSV via Gmail (App Password) |
-| 🌙 Dark mode | Automatically respects your OS colour-scheme preference |
-| 🦙 Ollama | Run fully offline with a local Ollama model (no API key needed) |
+| AI Chat | Ask questions in Hebrew or English; the bot runs pandas analyses and creates charts automatically |
+| AI Dashboard | Chat-driven dashboard builder — describe charts in natural language and the AI creates, modifies, and arranges them |
+| Chart Builder | Interactive Plotly chart builder with 8 chart types and 16 colour palettes |
+| Dashboard | Collect charts into a customisable multi-column dashboard |
+| Data View | Browse, search, filter, and auto-fix data quality issues |
+| Streaming Control | Live streaming with a stop button — cancel AI responses mid-stream |
+| Export | Download conversation as HTML or PDF, AI charts as ZIP, dashboard as interactive HTML |
+| Email | Send the conversation or data CSV via Gmail (App Password) |
+| Dark Mode | Automatically respects your OS colour-scheme preference |
+| Multi-Provider | Anthropic Claude, OpenAI, Google Gemini, Groq, or local Ollama |
+
+---
+
+## Supported LLM Providers
+
+| Provider | Models | API Key Required |
+|---|---|---|
+| Anthropic | Claude Opus, Sonnet, Haiku | Yes |
+| OpenAI | GPT-4o, GPT-4, GPT-3.5 | Yes |
+| Google | Gemini Pro, Flash | Yes |
+| Groq | Llama, Mixtral | Yes |
+| Ollama | Any local model | No (runs locally) |
 
 ---
 
 ## Quick Start
 
-### 1 · Local (Python 3.9+)
+### 1 - Local (Python 3.9+)
 
 ```bash
 git clone https://github.com/Noams94/data-analyst-chatbot.git
@@ -32,18 +46,18 @@ pip install -r requirements.txt
 streamlit run app.py
 ```
 
-Set your Anthropic API key in the sidebar **or** export it as an environment variable:
+Set your API key in the sidebar or export it as an environment variable:
 
 ```bash
 export ANTHROPIC_API_KEY=sk-ant-...
 streamlit run app.py
 ```
 
-### 2 · Docker
+### 2 - Docker
 
 ```bash
 docker compose up --build
-# → http://localhost:8501
+# -> http://localhost:8501
 ```
 
 Pass your API key via a `.env` file in the project root:
@@ -59,7 +73,7 @@ ANTHROPIC_API_KEY=sk-ant-...
 | File | Purpose |
 |---|---|
 | `.streamlit/config.toml` | Theme colours, max upload size (200 MB), headless mode |
-| `.streamlit/secrets.toml` | Store `ANTHROPIC_API_KEY` securely (not committed to git) |
+| `.streamlit/secrets.toml` | Store API keys securely (not committed to git) |
 
 **`secrets.toml` example:**
 ```toml
@@ -85,6 +99,22 @@ data_analyst_chatbot/
 
 ---
 
+## Tabs
+
+### Chat
+The main conversational interface. Upload a file, ask questions, and the AI runs analyses, generates charts, and provides insights. Includes a stop button to cancel streaming responses mid-generation.
+
+### AI Dashboard
+A chat-driven dashboard builder. Describe what you want in natural language (e.g., "create a bar chart of sales by region") and the AI uses tool-calling to create, modify, reorder, and delete charts. Charts are rendered as interactive Plotly visualisations with drag-and-drop arrangement.
+
+### Dashboard
+Manual chart builder with 8 chart types (Bar, Line, Area, Pie, Histogram, Scatter, Box Plot, Heatmap) and 16 colour palettes. Add charts to a multi-column dashboard layout and export as interactive HTML.
+
+### Data
+Browse the uploaded dataset with search, filtering, and data quality diagnostics.
+
+---
+
 ## Running Tests
 
 ```bash
@@ -97,9 +127,9 @@ pytest tests/ -v
 ## Tech Stack
 
 - **Frontend:** Streamlit
-- **AI:** chatlas + Anthropic Claude Opus 4.6 (or Ollama)
+- **AI:** chatlas + Anthropic / OpenAI / Google / Groq / Ollama
 - **Data:** pandas, numpy
-- **Charts:** matplotlib / seaborn (AI), Plotly (builder & dashboard) — animated entry, custom hover tooltips, dotted grids, donut pies, auto-rotated labels
+- **Charts:** matplotlib + seaborn (AI chat), Plotly (builder, dashboard, AI dashboard)
 - **PDF:** fpdf2 + python-bidi (Hebrew RTL support)
 - **Email:** smtplib (stdlib)
 
@@ -109,7 +139,7 @@ pytest tests/ -v
 
 ### Tool Pipeline
 
-The AI uses **4 registered tools** via Claude's function-calling API (managed by `chatlas`):
+The AI uses **4 registered tools** via function-calling (managed by `chatlas`):
 
 | # | Tool | Purpose |
 |---|------|---------|
@@ -124,47 +154,31 @@ Every AI response follows a strict order enforced by the system prompt:
 
 1. **Understand** — call `get_data_overview()` to inspect the dataset structure
 2. **Compute** — call `run_analysis()` with pandas code to calculate exact numbers
-3. **Report** — write the answer using **only** numbers produced by the analysis
+3. **Report** — write the answer using only numbers produced by the analysis
 4. **Visualise** — call `create_chart()` for every key finding
 
 ### Code Execution — `run_analysis()`
 
-Uses a **split exec / eval** pattern in a sandboxed namespace:
-
-```python
-# Sandboxed namespace — only pandas, numpy, json + a copy of the data
-local_ns = {"df": _df.copy(), "pd": pd, "np": np, "json": json}
-
-# Execute all lines except the last
-exec("\n".join(lines[:-1]), local_ns)
-
-# Evaluate the last line to capture the result
-result = eval(lines[-1], local_ns)
-```
+Uses a split exec / eval pattern in a sandboxed namespace:
 
 - The DataFrame is **copied** before execution (original data is never mutated)
 - **No access** to the filesystem, network, or OS commands
-- Results are capped at **50 rows × 20 columns**
+- Results are capped at **50 rows x 20 columns**
 - All executed code is saved and displayed to the user in the Code panel
 
 ### Chart Generation — `create_chart()`
 
-**Supported chart types:** `bar` · `barh` · `line` · `scatter` · `hist` · `box` · `pie` · `heatmap` · `count`
+**Supported chart types:** bar, barh, line, scatter, hist, box, pie, heatmap, count
 
 **Parameters:** `x_column`, `y_column`, `aggregation` (sum / mean / count / median / max / min), `color_column`, `top_n`, `bins`, `sort`
 
-- RTL (Hebrew) text rendered correctly via `python-bidi`
-- Charts saved as PNG to the `charts/` directory
-- Month-name axes are sorted chronologically
-
 ### Dashboard Charts (Plotly)
 
-The interactive chart builder and dashboard use Plotly with a polished styling layer:
+The interactive chart builder and dashboards use Plotly with modern styling:
 
-- **16 colour palettes** — sequential (Purple, Blue, Green, Orange, Pink, Teal, Sunset, Gray, Magenta), diverging (RdBu, Spectral, PRGn), and qualitative (Vivid, Bold, Pastel, D3)
-- **Custom hover tooltips** — per-chart-type templates with thousands separators and RTL alignment
-- **Animated entry** — CSS fade-in on chart mount + Plotly transitions for data updates
-- **Modern styling** — dotted grid lines, horizontal legend, donut pies (hole=0.4), auto-rotated labels for 8+ categories, transparent legend, refined marker outlines
+- **16 colour palettes** — sequential, diverging, and qualitative
+- **Custom hover tooltips** — per-chart-type templates with thousands separators
+- **Animated entry** — CSS fade-in on chart mount + Plotly transitions
 - **Theme-aware** — all colours adapt to dark / light mode
 
 ### Guardrails
@@ -174,22 +188,13 @@ The system prompt enforces strict rules:
 - **Never** fabricate or estimate numbers — only report computed results
 - **Never** modify, delete, or write back to the user's data
 - **Never** access external URLs, files, APIs, or OS commands
-- If unsure about a number → "I need to verify" + run additional code
-
-### Response Format
-
-Every AI response is structured as:
-
-1. **📊 Key Findings** — bullet points with exact numbers
-2. **🔍 Interpretation** — what the numbers mean in context
-3. **💡 Insight / Recommendation** — business or analytical conclusion
-4. **➡️ Follow-up** — 1–2 suggested next questions
+- If unsure about a number, run additional code to verify
 
 ---
 
 ## Security Notes
 
-- API keys are stored **in-memory only** (session state) and never written to disk
+- API keys are stored in-memory only (session state) and never written to disk
 - The app password for email is never persisted between sessions
 - User input is capped at **2,000 characters** per message
 - AI requests are rate-limited to **30 per session**
