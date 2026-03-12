@@ -2464,12 +2464,10 @@ details[data-testid="stExpander"] {{
    NATIVE COMPONENT OVERRIDES (light/dark)
 ═══════════════════════════════════════════ */
 
-/* DataFrame & DataEditor — internal grid backgrounds */
-[data-testid="stDataFrame"] > div,
-[data-testid="stDataFrame"] [data-testid="glideDataEditor"],
-[data-testid="stDataFrameResizable"],
-.dvn-scroller {{
+/* DataFrame & DataEditor — outer container only (canvas-rendered internals must stay untouched) */
+[data-testid="stDataFrame"] {{
     background-color: {tc['bg-surface']} !important;
+    border-radius: 8px;
 }}
 
 /* Checkbox and radio — container + label */
