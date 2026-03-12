@@ -2460,6 +2460,95 @@ details[data-testid="stExpander"] {{
     box-shadow: 0 0 0 1px {tc['accent']}33 !important;
 }}
 
+/* ═══════════════════════════════════════════
+   NATIVE COMPONENT OVERRIDES (light/dark)
+═══════════════════════════════════════════ */
+
+/* DataFrame & DataEditor — internal grid backgrounds */
+[data-testid="stDataFrame"] > div,
+[data-testid="stDataFrame"] [data-testid="glideDataEditor"],
+[data-testid="stDataFrameResizable"],
+.dvn-scroller {{
+    background-color: {tc['bg-surface']} !important;
+}}
+
+/* Checkbox and radio — container + label */
+.stCheckbox > label,
+.stRadio > div {{
+    color: {tc['text-primary']} !important;
+}}
+[data-testid="stCheckbox"] span {{
+    color: {tc['text-primary']} !important;
+}}
+
+/* Multiselect — tag chips and dropdown */
+[data-baseweb="tag"] {{
+    background-color: {tc['bg-surface-raised']} !important;
+    color: {tc['text-primary']} !important;
+    border-color: {tc['border-default']} !important;
+}}
+[data-baseweb="select"] > div {{
+    background-color: {tc['bg-surface']} !important;
+    border-color: {tc['border-strong']} !important;
+}}
+[data-baseweb="input"] {{
+    background-color: {tc['bg-surface']} !important;
+}}
+
+/* Number input */
+.stNumberInput > div > div > input {{
+    background: {tc['bg-surface']} !important;
+    border-color: {tc['border-strong']} !important;
+    color: {tc['text-primary']} !important;
+    border-radius: 8px;
+}}
+
+/* Sidebar — full background + all children */
+[data-testid="stSidebar"] > div:first-child {{
+    background-color: {tc['bg-sidebar']} !important;
+}}
+[data-testid="stSidebar"] button {{
+    color: {tc['text-primary']} !important;
+}}
+
+/* Primary button styling */
+.stButton > button[kind="primary"],
+.stButton > button[data-testid="stBaseButton-primary"] {{
+    background: {tc['accent']} !important;
+    color: white !important;
+    border-color: {tc['accent']} !important;
+}}
+
+/* Alert boxes */
+[data-testid="stAlert"] {{
+    background-color: {tc['bg-surface']} !important;
+    border-color: {tc['border-default']} !important;
+}}
+
+/* Tooltip and popover */
+[data-baseweb="tooltip"] {{
+    background-color: {tc['bg-surface-raised']} !important;
+    color: {tc['text-primary']} !important;
+}}
+
+/* Main block container */
+.main .block-container {{
+    background-color: {tc['bg-app']} !important;
+}}
+
+/* Top toolbar area */
+[data-testid="stToolbar"] {{
+    background-color: {tc['bg-app']} !important;
+}}
+[data-testid="stDecoration"] {{
+    background-image: none !important;
+}}
+
+/* Bottom container background (chat input area) */
+[data-testid="stBottomBlockContainer"] {{
+    background-color: {tc['bg-app']} !important;
+}}
+
 </style>
 """, unsafe_allow_html=True)
 
