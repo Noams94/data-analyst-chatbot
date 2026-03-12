@@ -94,6 +94,7 @@ TEXT = {
         "tab_dashboard":      "📈 דשבורד",
         "tab_ai_dashboard":   "🤖 דשבורד AI",
         "tab_data":           "🗂 נתונים",
+        "chat_welcome":           "שלום! הנתונים נטענו בהצלחה. שאל אותי כל שאלה על הנתונים שלך — אני אנתח, אצור גרפים ואתן תובנות.",
         # AI Dashboard
         "ai_dash_input_ph":       "תאר את הדשבורד שאתה רוצה...",
         "ai_dash_welcome":        "שלום! אני יכול לבנות דשבורד שלם על סמך תיאור שלך.\n\nלדוגמה:\n- \"בנה דשבורד מכירות עם גרפים לפי חודש, מוצר ואזור\"\n- \"הוסף גרף עוגה לקטגוריות\"\n- \"שנה את הגרף הראשון לגרף קו\"",
@@ -375,6 +376,7 @@ TEXT = {
         "tab_dashboard":      "📈 Dashboard",
         "tab_ai_dashboard":   "🤖 AI Dashboard",
         "tab_data":           "🗂 Data",
+        "chat_welcome":           "Hello! Your data is loaded. Ask me anything about your dataset — I'll analyze, create charts, and provide insights.",
         # AI Dashboard
         "ai_dash_input_ph":       "Describe the dashboard you want...",
         "ai_dash_welcome":        "Hello! I can build a complete dashboard from your description.\n\nExamples:\n- \"Build a sales dashboard with charts by month, product, and region\"\n- \"Add a pie chart for categories\"\n- \"Change the first chart to a line chart\"",
@@ -3340,6 +3342,10 @@ def render_sidebar(T: dict) -> None:
             st.session_state.chat = None
             st.session_state.current_chat_id = None
             st.session_state.chips_hidden = False
+            st.session_state._request_count = 0
+            st.session_state._partial_response = ""
+            st.session_state._is_streaming = False
+            st.session_state._streaming_target = None
             st.rerun()
 
         st.markdown("---")
@@ -3799,7 +3805,13 @@ def main() -> None:
                 st.info(T["chat_loaded_note"])
                 st.session_state.chat_just_loaded = False
 
-            render_history()
+            # Welcome message + chips for empty conversation
+            if not st.session_state.messages:
+                with st.chat_message("assistant"):
+                    st.markdown(T["chat_welcome"])
+                _render_quick_chips(T, context_aware=False)
+            else:
+                render_history()
 
         # ── Recover from interrupted streaming ─────────────────────────
         if st.session_state._is_streaming and st.session_state._streaming_target == "chat":
