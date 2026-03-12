@@ -161,6 +161,9 @@ TEXT = {
         "columns_expander":   "עמודות",
         "data_showing":       "מציג {n:,} מתוך {total:,} שורות",
         "no_numeric_cols":    "אין עמודות מספריות לסטטיסטיקות",
+        "stats_tab_numeric":  "מספרי",
+        "stats_tab_categ":    "קטגוריאלי",
+        "no_categ_cols":      "אין עמודות קטגוריאליות",
         "chart_added_total":  "סה\"כ {n} גרפים בדשבורד",
         "chat_error":         "❌ שגיאה בעיבוד השאלה",
         "export_csv":         "⬇️ ייצא CSV",
@@ -443,6 +446,9 @@ TEXT = {
         "columns_expander":   "Columns",
         "data_showing":       "Showing {n:,} of {total:,} rows",
         "no_numeric_cols":    "No numeric columns for statistics",
+        "stats_tab_numeric":  "Numeric",
+        "stats_tab_categ":    "Categorical",
+        "no_categ_cols":      "No categorical columns",
         "chart_added_total":  "{n} charts in dashboard",
         "chat_error":         "❌ Error processing your question",
         "export_csv":         "⬇️ Export CSV",
@@ -4471,10 +4477,28 @@ def main() -> None:
                 )
             if st.checkbox(T["data_stats_chk"], key="data_stats_cb"):
                 num_only = df_data.select_dtypes(include="number")
-                if not num_only.empty:
-                    st.dataframe(num_only.describe().round(2), use_container_width=True)
-                else:
-                    st.info(T["no_numeric_cols"])
+                cat_only = df_data.select_dtypes(exclude="number")
+                _tab_num, _tab_cat = st.tabs([T["stats_tab_numeric"], T["stats_tab_categ"]])
+                with _tab_num:
+                    if not num_only.empty:
+                        st.dataframe(num_only.describe().round(2), use_container_width=True)
+                    else:
+                        st.info(T["no_numeric_cols"])
+                with _tab_cat:
+                    if not cat_only.empty:
+                        for col in cat_only.columns:
+                            with st.expander(col, expanded=False):
+                                vc = cat_only[col].value_counts()
+                                if len(vc) > 30:
+                                    vc = vc.head(30)
+                                freq_df = pd.DataFrame({
+                                    "Value": vc.index.astype(str),
+                                    "Count": vc.values,
+                                    "%": (vc.values / len(df_data) * 100).round(1),
+                                })
+                                st.dataframe(freq_df, use_container_width=True, hide_index=True)
+                    else:
+                        st.info(T["no_categ_cols"])
 
 if __name__ == "__main__":
     main()
