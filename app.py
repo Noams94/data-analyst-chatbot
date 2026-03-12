@@ -2462,13 +2462,20 @@ details[data-testid="stExpander"] {{
 
 /* ═══════════════════════════════════════════
    NATIVE COMPONENT OVERRIDES (light/dark)
+   config.toml base = "light" — so dark mode
+   needs extra overrides for native widgets.
 ═══════════════════════════════════════════ */
 
-/* DataFrame & DataEditor — outer container only (canvas-rendered internals must stay untouched) */
+/* DataFrame & DataEditor — outer container */
 [data-testid="stDataFrame"] {{
     background-color: {tc['bg-surface']} !important;
     border-radius: 8px;
 }}
+{"" if theme == "light" else f'''/* Dark mode: invert the light canvas-rendered DataFrame cells */
+[data-testid="stDataFrame"] iframe,
+[data-testid="stDataFrame"] [data-testid="glideDataEditor"] {{
+    filter: invert(0.88) hue-rotate(180deg) !important;
+}}'''}
 
 /* Checkbox and radio — container + label */
 .stCheckbox > label,
@@ -2488,9 +2495,31 @@ details[data-testid="stExpander"] {{
 [data-baseweb="select"] > div {{
     background-color: {tc['bg-surface']} !important;
     border-color: {tc['border-strong']} !important;
+    color: {tc['text-primary']} !important;
 }}
 [data-baseweb="input"] {{
     background-color: {tc['bg-surface']} !important;
+    color: {tc['text-primary']} !important;
+}}
+
+/* Dropdown menu / popover (selectbox options) */
+[data-baseweb="popover"] > div,
+[data-baseweb="menu"] {{
+    background-color: {tc['bg-surface']} !important;
+    border-color: {tc['border-default']} !important;
+}}
+[data-baseweb="menu"] li {{
+    color: {tc['text-primary']} !important;
+}}
+[data-baseweb="menu"] li:hover {{
+    background-color: {tc['bg-hover']} !important;
+}}
+
+/* Text input */
+.stTextInput > div > div > input {{
+    background: {tc['bg-surface']} !important;
+    border-color: {tc['border-strong']} !important;
+    color: {tc['text-primary']} !important;
 }}
 
 /* Number input */
@@ -2499,6 +2528,13 @@ details[data-testid="stExpander"] {{
     border-color: {tc['border-strong']} !important;
     color: {tc['text-primary']} !important;
     border-radius: 8px;
+}}
+
+/* Text area */
+.stTextArea > div > div > textarea {{
+    background: {tc['bg-surface']} !important;
+    border-color: {tc['border-strong']} !important;
+    color: {tc['text-primary']} !important;
 }}
 
 /* Sidebar — full background + all children */
@@ -2516,6 +2552,20 @@ details[data-testid="stExpander"] {{
     color: white !important;
     border-color: {tc['accent']} !important;
 }}
+/* Secondary buttons */
+.stButton > button:not([kind="primary"]):not([data-testid="stBaseButton-primary"]) {{
+    color: {tc['text-primary']} !important;
+    border-color: {tc['border-strong']} !important;
+}}
+
+/* Expander */
+[data-testid="stExpander"] {{
+    background-color: {tc['bg-surface']} !important;
+    border-color: {tc['border-default']} !important;
+}}
+[data-testid="stExpander"] summary {{
+    color: {tc['text-primary']} !important;
+}}
 
 /* Alert boxes */
 [data-testid="stAlert"] {{
@@ -2527,6 +2577,14 @@ details[data-testid="stExpander"] {{
 [data-baseweb="tooltip"] {{
     background-color: {tc['bg-surface-raised']} !important;
     color: {tc['text-primary']} !important;
+}}
+
+/* Tabs — active/inactive styling */
+.stTabs [data-baseweb="tab-list"] {{
+    background-color: transparent !important;
+}}
+.stTabs [data-baseweb="tab"] {{
+    color: {tc['text-secondary']} !important;
 }}
 
 /* Main block container */
@@ -2545,6 +2603,11 @@ details[data-testid="stExpander"] {{
 /* Bottom container background (chat input area) */
 [data-testid="stBottomBlockContainer"] {{
     background-color: {tc['bg-app']} !important;
+}}
+
+/* Chat message containers */
+[data-testid="stChatMessage"] {{
+    color: {tc['text-primary']} !important;
 }}
 
 </style>
