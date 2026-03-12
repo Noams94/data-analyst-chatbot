@@ -31,7 +31,6 @@ sys.path.insert(0, str(Path(__file__).parent))
 import tools
 import plotly.express as px
 import plotly.graph_objects as go
-from streamlit_sortables import sort_items
 
 # ─── Page Config ──────────────────────────────────────────────────────────────
 st.set_page_config(
@@ -165,9 +164,7 @@ TEXT = {
         "stats_tab_numeric":  "מספרי",
         "stats_tab_categ":    "קטגוריאלי",
         "no_categ_cols":      "אין עמודות קטגוריאליות",
-        "cat_sort_by":        "מיין לפי",
-        "cat_drag_hint":      "גרור לסידור מחדש",
-        "cat_exclude_lbl":    "הסר ערכים",
+        "cat_order_hint":     "סמן Exclude להסרה, ערוך Order לשינוי סדר",
         "chart_added_total":  "סה\"כ {n} גרפים בדשבורד",
         "chat_error":         "❌ שגיאה בעיבוד השאלה",
         "export_csv":         "⬇️ ייצא CSV",
@@ -453,9 +450,7 @@ TEXT = {
         "stats_tab_numeric":  "Numeric",
         "stats_tab_categ":    "Categorical",
         "no_categ_cols":      "No categorical columns",
-        "cat_sort_by":        "Sort by",
-        "cat_drag_hint":      "Drag to reorder",
-        "cat_exclude_lbl":    "Exclude values",
+        "cat_order_hint":     "Check Exclude to remove, edit Order to reorder",
         "chart_added_total":  "{n} charts in dashboard",
         "chat_error":         "❌ Error processing your question",
         "export_csv":         "⬇️ Export CSV",
@@ -4496,51 +4491,62 @@ def main() -> None:
                     if _cat_cols:
                         for col in _cat_cols:
                             with st.expander(col, expanded=False):
-                                # ── Exclude filter ──
-                                _all_vals = cat_only[col].dropna().unique().tolist()
-                                _all_vals_str = sorted([str(v) for v in _all_vals])
-                                _excluded = st.multiselect(
-                                    T["cat_exclude_lbl"], _all_vals_str,
-                                    key=f"cat_excl_{col}",
-                                )
-                                _filtered = cat_only[col][~cat_only[col].astype(str).isin(_excluded)]
-                                _total = len(_filtered)
-                                vc = _filtered.value_counts()
+                                # Raw value counts (all values)
+                                vc = cat_only[col].value_counts()
                                 if len(vc) > 30:
                                     vc = vc.head(30)
+                                _raw_counts = {str(v): int(c) for v, c in vc.items()}
+                                _values = list(_raw_counts.keys())
 
-                                # Build items list
-                                freq_items = []
-                                for val, cnt in vc.items():
-                                    pct = round(cnt / _total * 100, 1) if _total > 0 else 0.0
-                                    freq_items.append({
-                                        "label": f"{val}  \u2014  {cnt:,}  \u2014  {pct}%",
-                                        "value": str(val), "count": cnt, "pct": pct,
-                                    })
+                                # Build editable DataFrame
+                                freq_df = pd.DataFrame({
+                                    "Exclude": [False] * len(_values),
+                                    "Value":   _values,
+                                    "Order":   list(range(1, len(_values) + 1)),
+                                    "Count":   list(_raw_counts.values()),
+                                    "%":       [0.0] * len(_values),
+                                })
+                                # Calculate initial %
+                                _total_init = sum(_raw_counts.values())
+                                if _total_init > 0:
+                                    freq_df["%"] = (freq_df["Count"] / _total_init * 100).round(1)
 
-                                # ── Sort dropdown ──
-                                _sort_opts = ["Count", "Value", "%"]
-                                _sort_sel = st.selectbox(
-                                    T["cat_sort_by"], _sort_opts, key=f"cat_sort_{col}",
+                                # Editable table
+                                edited = st.data_editor(
+                                    freq_df,
+                                    key=f"cat_editor_{col}",
+                                    use_container_width=True,
+                                    hide_index=True,
+                                    disabled=["Value", "Count", "%"],
+                                    column_config={
+                                        "Exclude": st.column_config.CheckboxColumn(
+                                            "Exclude", default=False,
+                                        ),
+                                        "Order": st.column_config.NumberColumn(
+                                            "Order", min_value=1,
+                                        ),
+                                    },
                                 )
-                                if _sort_sel == "Value":
-                                    freq_items.sort(key=lambda x: x["value"])
-                                elif _sort_sel == "%":
-                                    freq_items.sort(key=lambda x: x["pct"], reverse=True)
 
-                                # ── Drag-and-drop reorder ──
-                                if freq_items:
-                                    st.caption(T["cat_drag_hint"])
-                                    labels = [it["label"] for it in freq_items]
-                                    sorted_labels = sort_items(labels, key=f"drag_{col}")
-                                    lbl_map = {it["label"]: it for it in freq_items}
-                                    sorted_items = [lbl_map[lbl] for lbl in sorted_labels]
-                                    freq_df = pd.DataFrame({
-                                        "Value": [it["value"] for it in sorted_items],
-                                        "Count": [it["count"] for it in sorted_items],
-                                        "%": [it["pct"] for it in sorted_items],
-                                    })
-                                    st.dataframe(freq_df, use_container_width=True, hide_index=True)
+                                # Recalculate: excluded rows get "—", rest get recalculated %
+                                _included_mask = ~edited["Exclude"]
+                                _included_total = edited.loc[_included_mask, "Count"].sum()
+                                _result = edited.copy()
+                                if _included_total > 0:
+                                    _result.loc[_included_mask, "%"] = (
+                                        _result.loc[_included_mask, "Count"] / _included_total * 100
+                                    ).round(1)
+                                _result.loc[~_included_mask, "Count"] = None
+                                _result.loc[~_included_mask, "%"] = None
+
+                                # Sort by Order and display
+                                _result = _result.sort_values("Order").reset_index(drop=True)
+                                st.dataframe(
+                                    _result[["Exclude", "Value", "Order", "Count", "%"]],
+                                    use_container_width=True,
+                                    hide_index=True,
+                                )
+                                st.caption(T["cat_order_hint"])
                     else:
                         st.info(T["no_categ_cols"])
 
