@@ -2471,9 +2471,10 @@ details[data-testid="stExpander"] {{
     background-color: {tc['bg-surface']} !important;
     border-radius: 8px;
 }}
-{"" if theme == "light" else f'''/* Dark mode: invert the light canvas-rendered DataFrame cells */
-[data-testid="stDataFrame"] iframe,
-[data-testid="stDataFrame"] [data-testid="glideDataEditor"] {{
+{"" if theme == "dark" else f'''/* Light mode: the canvas still renders dark from Streamlit base theme cache.
+   Invert it so it appears light with dark text. */
+.stDataFrameGlideDataEditor,
+[data-testid="stDataFrame"] iframe {{
     filter: invert(0.88) hue-rotate(180deg) !important;
 }}'''}
 
