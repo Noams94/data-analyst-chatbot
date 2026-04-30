@@ -1,79 +1,151 @@
-# Deploying to Vercel
+# Deploy
 
-Two services in one project — Next.js frontend (`web/`) + FastAPI backend (`api/`) — declared in the root `vercel.json` via `experimentalServices`.
+Two services, two hosts:
+- **Web (Next.js)** → Vercel.
+- **API (FastAPI)** → Fly.io. (Vercel's Python serverless setup is awkward
+  with our package layout; Fly is well-trodden and the repo already has a
+  Dockerfile.)
 
-## One-time provisioning
+They communicate via plain HTTPS. Frontend points at the API URL via
+`NEXT_PUBLIC_API_URL`. Auth is Clerk-issued JWTs sent on every API call.
 
-Run from the repo root.
+---
 
-```bash
-# 1. Link the project to Vercel
-vercel link
+## Current state
 
-# 2. Add the Marketplace integrations (each opens a tab in the dashboard)
-vercel integrations add neon       # Postgres → auto-sets DATABASE_URL
-vercel integrations add clerk      # Auth → auto-sets NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY + CLERK_SECRET_KEY
+✅ **Web is deployed**: https://web-one-henna-87.vercel.app
 
-# 3. Set the remaining env vars yourself
-vercel env add OLLAMA_BASE_URL     # paste your hosted Ollama URL, e.g. https://ollama.example.com
-vercel env add OLLAMA_MODEL        # e.g. gpt-oss:20b
-vercel env add CLERK_JWKS_URL      # https://YOUR-DOMAIN.clerk.accounts.dev/.well-known/jwks.json
-vercel env add CLERK_ISSUER        # https://YOUR-DOMAIN.clerk.accounts.dev
-vercel env add NEXT_PUBLIC_API_URL # the URL of the deployed API service (printed after first deploy)
-```
+The Next.js frontend is live in keyless Clerk mode (no real auth — fine
+for browsing the landing). To finish, provision the rest:
 
-## Required env vars
+1. **Postgres** (Neon via Vercel Marketplace) → backs both services
+2. **Clerk app** (real keys; replaces keyless mode)
+3. **Fly.io app** for the API (`api/Dockerfile` + `api/fly.toml`)
+4. **Hosted Ollama URL** wired into the Fly.io app
 
-### Frontend (`web/`)
-| Name | Source | Notes |
-|---|---|---|
-| `NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY` | Clerk Marketplace | auto-set |
-| `CLERK_SECRET_KEY` | Clerk Marketplace | auto-set |
-| `NEXT_PUBLIC_API_URL` | manual | URL of the deployed API service |
+---
 
-### Backend (`api/`)
-| Name | Source | Notes |
-|---|---|---|
-| `DATABASE_URL` | Neon Marketplace | auto-set, e.g. `postgres://…?sslmode=require` |
-| `OLLAMA_BASE_URL` | manual | hosted Ollama endpoint; defaults to `http://localhost:11434` for dev |
-| `OLLAMA_MODEL` | manual | defaults to `gpt-oss:20b` |
-| `CLERK_JWKS_URL` | manual | from Clerk dashboard → API Keys → Public Key. **If unset, the API runs in anonymous mode (dev only).** |
-| `CLERK_ISSUER` | manual | matches the dashboard's Frontend API URL |
-| `ANTHROPIC_API_KEY` | manual | optional. If set, the API auto-switches to Anthropic and ignores Ollama. |
-| `AUTH_DISABLED` | manual | `1` to force anonymous mode in prod (don't). |
+## Web — Vercel
 
-## Deploy
+Already linked from `web/` directory. Production deploy:
 
 ```bash
-# Preview deploy
-vercel
-
-# Production
+cd web
 vercel --prod
 ```
 
-## Verifying
-
+### Required env vars
 ```bash
-# Health
-curl https://your-app.vercel.app/api/health
-
-# Routes
-curl https://your-app.vercel.app/api/openapi.json | jq '.paths | keys'
-
-# Auth check (should reject without a token in prod)
-curl -i https://your-app.vercel.app/api/datasets    # → 401 if Clerk is wired
+vercel env add NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY  # from Clerk dashboard
+vercel env add CLERK_SECRET_KEY                   # from Clerk dashboard
+vercel env add NEXT_PUBLIC_API_URL                # the deployed Fly.io URL, e.g. https://data-analyst-chatbot-api.fly.dev
 ```
 
-In the browser, sign in with Clerk → drop a CSV → ask a question → confirm tokens stream and a chart appears.
+Best path for Clerk: `vercel integrations add clerk` opens the Marketplace
+and auto-populates the two Clerk env vars.
+
+---
+
+## API — Fly.io
+
+```bash
+cd api
+
+# 1. Create the app (only first time)
+fly launch --no-deploy --copy-config --name data-analyst-chatbot-api
+
+# 2. Add a persistent volume for parquet/datasets (matches DATA_DIR=/data)
+fly volumes create data_volume --region fra --size 1
+
+# 3. Set secrets
+fly secrets set DATABASE_URL='postgres://...sslmode=require'      # from Neon
+fly secrets set OLLAMA_BASE_URL='https://your-hosted-ollama.com'
+fly secrets set OLLAMA_MODEL='gpt-oss:20b'                        # or whichever you host
+fly secrets set CLERK_JWKS_URL='https://YOUR-DOMAIN.clerk.accounts.dev/.well-known/jwks.json'
+fly secrets set CLERK_ISSUER='https://YOUR-DOMAIN.clerk.accounts.dev'
+# Optional — falls back to Ollama if unset:
+# fly secrets set ANTHROPIC_API_KEY='sk-ant-...'
+
+# 4. Deploy
+fly deploy
+```
+
+After deploy, copy the URL Fly prints and set it as `NEXT_PUBLIC_API_URL`
+in the Vercel project. Then re-deploy the web service so it picks up the
+new env var.
+
+### Health check
+```bash
+curl https://data-analyst-chatbot-api.fly.dev/health     # → {"status":"ok"}
+curl -i https://data-analyst-chatbot-api.fly.dev/datasets # → 401 if Clerk is wired
+```
+
+---
+
+## Postgres — Neon
+
+Easiest: `vercel integrations add neon` from the `web/` directory. The
+integration auto-sets `DATABASE_URL` for the Next.js project. Copy that
+URL value and add it to Fly.io as a secret too:
+
+```bash
+fly secrets set DATABASE_URL="$(vercel env pull --output - .env.production | grep DATABASE_URL | cut -d= -f2-)"
+```
+
+Or just paste it manually.
+
+---
+
+## Clerk — real keys
+
+If you used the Vercel Marketplace integration above, the publishable key
+and secret are already set in `web/`. For the API to verify JWTs you also
+need:
+
+- `CLERK_JWKS_URL` — from the Clerk dashboard → API Keys → Public Key
+  (the JWKS URL is shown there)
+- `CLERK_ISSUER` — same place; it's the Frontend API URL
+
+Set both as Fly.io secrets (see above).
+
+---
+
+## Required env vars summary
+
+### Web (Vercel)
+| Name | Source |
+|---|---|
+| `NEXT_PUBLIC_CLERK_PUBLISHABLE_KEY` | Clerk Marketplace |
+| `CLERK_SECRET_KEY` | Clerk Marketplace |
+| `NEXT_PUBLIC_API_URL` | Fly.io URL (set after first deploy) |
+
+### API (Fly.io)
+| Name | Source |
+|---|---|
+| `DATABASE_URL` | Neon |
+| `OLLAMA_BASE_URL` | your hosted Ollama provider |
+| `OLLAMA_MODEL` | model name, e.g. `gpt-oss:20b` |
+| `CLERK_JWKS_URL` | Clerk dashboard |
+| `CLERK_ISSUER` | Clerk dashboard |
+| `ANTHROPIC_API_KEY` | optional — auto-overrides Ollama if set |
+| `AUTH_DISABLED` | `1` for anonymous mode (don't use in prod) |
+
+---
 
 ## Architecture notes
 
-- **Persistence**: SQLAlchemy 2 sync. `DATABASE_URL=postgres://…` switches to psycopg2; otherwise SQLite at `api/data.db`.
-- **Charts**: PNG bytes stored in the DB (`charts.image_bytes`). Inlined as base64 `data:` URLs in the SSE stream and chat-fetch responses, so `<img>` tags don't need an auth round-trip.
-- **Auth**: Every `/api/*` route requires `Authorization: Bearer <Clerk JWT>`. The frontend wires this via `useAuth().getToken()`. JWKS is fetched once per hour and cached.
-- **User scoping**: `datasets` and `chats` carry `user_id`. Every read filters by it; every write stamps it.
-- **Multi-tenant streaming**: tools.py uses `contextvars` so concurrent requests don't clobber each other's DataFrames.
+- **Persistence**: SQLAlchemy 2 sync. `DATABASE_URL=postgres://…` switches
+  to psycopg2; otherwise SQLite at `api/data.db`.
+- **Charts**: PNG bytes stored in the DB (`charts.image_bytes`). Inlined
+  as base64 `data:` URLs in SSE events and chat-fetch responses, so
+  `<img>` tags don't need an auth round-trip.
+- **Auth**: Every `/api/*` route requires `Authorization: Bearer <Clerk
+  JWT>`. The frontend wires this via `useAuth().getToken()`. JWKS is
+  fetched once per hour and cached in memory.
+- **User scoping**: `datasets` and `chats` carry `user_id`. Every read
+  filters by it; every write stamps it.
+- **Multi-tenant streaming**: `tools.py` uses `contextvars` so concurrent
+  requests don't clobber each other's DataFrames.
 
 ## Local development
 
@@ -86,11 +158,7 @@ cd api && python3 -m venv .venv && .venv/bin/pip install -r requirements.txt
 pnpm --dir web dev
 ```
 
-In dev, Clerk runs in keyless mode and the API uses `AUTH_DISABLED` semantics (no `CLERK_JWKS_URL` set → user_id falls back to `"anonymous"`). To exercise the auth path locally, set `CLERK_JWKS_URL` and `CLERK_ISSUER` against a real Clerk dev instance.
-
-## Known limitations to fix before serious traffic
-
-- SQLite is the local default. **Postgres is required for any real deploy.**
-- Charts in DB are fine up to a few hundred per chat (~20 KB each). For higher volume, swap to Vercel Blob and store URLs.
-- Ollama on Vercel doesn't exist — set `OLLAMA_BASE_URL` to a hosted endpoint, or set `ANTHROPIC_API_KEY` and the provider auto-switches.
-- Ephemeral parquet files are written to `api/data/datasets/`. On Vercel Functions this lives in `/tmp` per-invocation. Set `DATA_DIR=/tmp/data` in env so it works across cold starts within the same instance lifetime; for true durability move parquet to Blob too.
+In dev, Clerk runs in keyless mode and the API uses anonymous mode (no
+`CLERK_JWKS_URL` set → user_id falls back to `"anonymous"`). To exercise
+the auth path locally, set `CLERK_JWKS_URL` and `CLERK_ISSUER` against a
+real Clerk dev instance.
