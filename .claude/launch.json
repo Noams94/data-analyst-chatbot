@@ -1,0 +1,25 @@
+{
+  "version": "0.0.1",
+  "configurations": [
+    {
+      "name": "web",
+      "runtimeExecutable": "pnpm",
+      "runtimeArgs": ["--dir", "/Users/noamkeshet/Documents/Claude/data_analyst_chatbot/web", "dev"],
+      "autoPort": true
+    },
+    {
+      "name": "api",
+      "runtimeExecutable": "/Users/noamkeshet/Documents/Claude/data_analyst_chatbot/api/.venv/bin/uvicorn",
+      "runtimeArgs": ["api.main:app", "--reload"],
+      "cwd": "/Users/noamkeshet/Documents/Claude/data_analyst_chatbot",
+      "autoPort": true
+    },
+    {
+      "name": "data-analyst-chatbot",
+      "runtimeExecutable": "/Users/noamkeshet/Library/Python/3.9/bin/streamlit",
+      "runtimeArgs": ["run", "/Users/noamkeshet/Documents/Claude/data_analyst_chatbot/app.py", "--browser.gatherUsageStats", "false", "--server.headless", "true"],
+      "autoPort": true,
+      "cwd": "/Users/noamkeshet/Documents/Claude/data_analyst_chatbot"
+    }
+  ]
+}

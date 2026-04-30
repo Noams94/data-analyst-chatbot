@@ -4,6 +4,7 @@ Bilingual (Hebrew / English) interface powered by chatlas + Claude Opus 4.6
 """
 
 import os
+import re
 import sys
 import logging
 import datetime
@@ -273,6 +274,7 @@ TEXT = {
         # code viewer panel
         "code_panel_lbl":        "🔎 קוד מאחורי התשובה",
         "code_tab_analysis":     "📊 שאילתת נתונים",
+        "code_tab_sql":          "🗃️ שאילתת SQL",
         "code_tab_chart":        "🎨 קוד יצירת הגרף",
         "code_panel_hint":       "לחץ על סמל ⎘ בפינת הקוד להעתקה",
         "code_toggle_help":      "הצג/הסתר קוד",
@@ -280,6 +282,9 @@ TEXT = {
         "copy_response_ok":      "הועתק!",
         "chart_code_label":      "📋 קוד Python של הגרף",
         "chart_builder_err":     "שגיאה ביצירת גרף",
+        "chart_error_short":     "שגיאה",
+        "image_not_found":       "תמונה לא נמצאה",
+        "chart_fallback":        "גרף",
         "corr_matrix_title":     "מטריצת קורלציה",
         "unknown_chart_type":    "סוג גרף לא מוכר",
         # sidebar redesign — conversation history
@@ -292,6 +297,7 @@ TEXT = {
         "chat_date_earlier":     "מוקדם יותר",
         "del_chat_btn":          "🗑",
         "del_chat_help":         "מחק שיחה זו",
+        "change_data_btn":       "📂 החלף קובץ נתונים",
         "dataset_badge_tpl":     "📊 {name} · {rows:,} שורות · {cols} עמודות",
         # chat-based onboarding
         "onboard_welcome": (
@@ -559,6 +565,7 @@ TEXT = {
         # code viewer panel
         "code_panel_lbl":        "🔎 Code behind this answer",
         "code_tab_analysis":     "📊 Data Query",
+        "code_tab_sql":          "🗃️ SQL Query",
         "code_tab_chart":        "🎨 Chart Code",
         "code_panel_hint":       "Click the ⎘ icon in the code corner to copy",
         "code_toggle_help":      "Show/hide code",
@@ -566,6 +573,9 @@ TEXT = {
         "copy_response_ok":      "Copied!",
         "chart_code_label":      "📋 Python chart code",
         "chart_builder_err":     "Error building chart",
+        "chart_error_short":     "Error",
+        "image_not_found":       "Image not found",
+        "chart_fallback":        "Chart",
         "corr_matrix_title":     "Correlation Matrix",
         "unknown_chart_type":    "Unknown chart type",
         # sidebar redesign — conversation history
@@ -578,6 +588,7 @@ TEXT = {
         "chat_date_earlier":     "Earlier",
         "del_chat_btn":          "🗑",
         "del_chat_help":         "Delete this conversation",
+        "change_data_btn":       "📂 Change Dataset",
         "dataset_badge_tpl":     "📊 {name} · {rows:,} rows · {cols} columns",
         # chat-based onboarding
         "onboard_welcome": (
@@ -622,14 +633,16 @@ Respond in the same language the user writes in (Hebrew or English).
 
 ## Analytical Process (Chain-of-Thought — always follow this order)
 1. FIRST call get_data_overview() to understand the dataset structure and column names.
-2. THEN call run_analysis() to compute the exact numbers needed to answer the question.
+2. THEN call run_analysis() (Python/pandas) or run_sql() (SQL) to compute the exact numbers.
+   - Prefer SQL for: groupby, filtering, aggregations, joins, ranking (window functions).
+   - Prefer pandas for: pivot tables, complex reshaping, string/regex operations, custom logic.
 3. ONLY THEN write your response — using only the numbers you actually computed.
 4. Visualize every key finding with create_chart().
 
 ## Guardrails (STRICT — never violate)
-- ONLY report numbers and statistics that you computed with run_analysis().
+- ONLY report numbers and statistics that you computed with run_analysis() or run_sql().
   Never estimate, approximate, or invent figures.
-- If you are unsure about a number, say "I need to verify this" and call run_analysis().
+- If you are unsure about a number, say "I need to verify this" and call run_analysis() or run_sql().
 - NEVER suggest modifying, deleting, or writing back to the user's data.
 - NEVER access external URLs, files, APIs, or services.
 - NEVER execute operating-system commands or import new libraries.
@@ -654,6 +667,13 @@ Response:
   🔍 **Interpretation** — Electronics dominate revenue; Laptop alone accounts for nearly a third.
   💡 **Insight** — Consider bundling Laptop with accessories to increase average basket size.
   ➡️ **Follow-up** — Want to see revenue trend by month for these products?
+
+## SQL Example
+User: "What are the top 5 cities by average salary?"
+Thought process:
+  → call get_data_overview() to confirm column names
+  → call run_sql("SELECT city, AVG(salary) AS avg_salary FROM df GROUP BY city ORDER BY avg_salary DESC LIMIT 5")
+  → call create_chart(chart_type='barh', x_column='city', y_column='avg_salary', title='Top 5 Cities by Average Salary')
 
 ## Chart Guidelines
 - barh  → many/long category names
@@ -808,7 +828,7 @@ PROVIDER_REGISTRY = {
 # ─── Data Validation ──────────────────────────────────────────────────────────
 
 @st.cache_data(show_spinner=False)
-def validate_dataframe(df: pd.DataFrame) -> list:
+def validate_dataframe(df: pd.DataFrame, lang: str = "he") -> list:
     """Return list of data-quality warnings (numeric-as-string, unparsed dates)."""
     warnings_list = []
     for col in df.select_dtypes(include="object").columns:
@@ -817,17 +837,29 @@ def validate_dataframe(df: pd.DataFrame) -> list:
             continue
         numeric_hits = sample.str.match(r"^[\d,\.]+%?$").sum()
         if numeric_hits >= len(sample) * 0.7:
-            warnings_list.append(
-                f"עמודה **'{col}'** נראית מספרית אך מאוחסנת כטקסט "
-                f"(לדוגמה: `{sample.iloc[0]}`). ניתן לתקן אוטומטית."
-            )
+            if lang == "en":
+                warnings_list.append(
+                    f"Column **'{col}'** looks numeric but is stored as text "
+                    f"(e.g. `{sample.iloc[0]}`). Can be auto-fixed."
+                )
+            else:
+                warnings_list.append(
+                    f"עמודה **'{col}'** נראית מספרית אך מאוחסנת כטקסט "
+                    f"(לדוגמה: `{sample.iloc[0]}`). ניתן לתקן אוטומטית."
+                )
             continue
         date_hits = sample.str.match(r"^\d{1,4}[-/\.]\d{1,2}[-/\.]\d{2,4}$").sum()
         if date_hits >= len(sample) * 0.7:
-            warnings_list.append(
-                f"עמודה **'{col}'** נראית כתאריך אך לא פוענחה כ-datetime "
-                f"(לדוגמה: `{sample.iloc[0]}`). ניתן לתקן אוטומטית."
-            )
+            if lang == "en":
+                warnings_list.append(
+                    f"Column **'{col}'** looks like a date but was not parsed as datetime "
+                    f"(e.g. `{sample.iloc[0]}`). Can be auto-fixed."
+                )
+            else:
+                warnings_list.append(
+                    f"עמודה **'{col}'** נראית כתאריך אך לא פוענחה כ-datetime "
+                    f"(לדוגמה: `{sample.iloc[0]}`). ניתן לתקן אוטומטית."
+                )
     return warnings_list
 
 
@@ -920,18 +952,23 @@ def _norm_palette(p: str) -> str:
     return _PALETTE_KEY_MAP.get(p, _PALETTE_KEY_MAP.get(p.strip(), p))
 
 
+def _chart_type_label(ct) -> str:
+    """Strip 'Hebrew / English' bilingual prefix to the English display label."""
+    s = str(ct)
+    return s.split(" / ")[-1] if " / " in s else s
+
+
 def _chart_types_for_lang() -> list[str]:
     """Return chart type labels for current UI language."""
     if st.session_state.get("lang") == "en":
-        return [ct.split(" / ")[-1] if " / " in ct else ct for ct in CHART_TYPES]
+        return [_chart_type_label(ct) for ct in CHART_TYPES]
     return list(CHART_TYPES)
 
 
 def _palettes_for_lang() -> dict[str, dict]:
     """Return palette dict with display keys for current UI language."""
     if st.session_state.get("lang") == "en":
-        return {(k.split(" / ")[-1] if " / " in k else k): v
-                for k, v in COLOR_PALETTES.items()}
+        return {_chart_type_label(k): v for k, v in COLOR_PALETTES.items()}
     return dict(COLOR_PALETTES)
 
 
@@ -1445,7 +1482,8 @@ def export_dashboard_html(charts_configs: list, df: pd.DataFrame,
     for cfg in charts_configs:
         try:
             fig = build_chart(cfg, df, sample_size=cfg.get("sample_size", 500))
-            lbl = cfg.get("title") or f"{cfg.get('type', 'Chart')} – {cfg.get('x', '')}"
+            _ct_disp = _chart_type_label(cfg.get("type", "Chart"))
+            lbl = cfg.get("title") or f"{_ct_disp} – {cfg.get('x', '')}"
             fig_html = pio.to_html(fig, full_html=False, include_plotlyjs=False)
             figs_html.append(
                 f'<div style="margin-bottom:2rem">'
@@ -1585,6 +1623,16 @@ def export_report_html(messages: list, title: str = "Analysis Report") -> bytes:
     """
     import base64, datetime as _dt
 
+    _is_he = st.session_state.get("lang", "he") != "en"
+    L = (
+        {"q": "שאלה", "dir": "rtl", "lang": "he", "created": "נוצר",
+         "questions": "שאלות", "charts": "גרפים", "snippets": "קטעי קוד",
+         "footer": "נוצר על ידי"}
+        if _is_he else
+        {"q": "Question", "dir": "ltr", "lang": "en", "created": "Created",
+         "questions": "questions", "charts": "charts", "snippets": "code snippets",
+         "footer": "Generated by"}
+    )
     now = _dt.datetime.now().strftime("%Y-%m-%d %H:%M")
     user_turns  = [m for m in messages if m["role"] == "user"]
     asst_turns  = [m for m in messages if m["role"] == "assistant"]
@@ -1617,8 +1665,9 @@ def export_report_html(messages: list, title: str = "Analysis Report") -> bytes:
             for _s in a.get("code_snippets", []):
                 _snip_code = _s["code"] if isinstance(_s, dict) else _s
                 _snip_lbl  = (
-                    "🎨 קוד גרף" if isinstance(_s, dict) and _s.get("type") == "chart"
-                    else "📊 קוד ניתוח"
+                    "🎨 Chart Code" if isinstance(_s, dict) and _s.get("type") == "chart"
+                    else "🗃️ SQL Query" if isinstance(_s, dict) and _s.get("type") == "sql"
+                    else "📊 Analysis Code"
                 )
                 charts_html += (
                     f'<details style="margin:8px 0;">'
@@ -1631,7 +1680,7 @@ def export_report_html(messages: list, title: str = "Analysis Report") -> bytes:
         <div style="margin-bottom:28px;border-bottom:1px solid #e0e0e0;padding-bottom:20px;">
           <div style="margin-bottom:8px;">
             <span style="background:#1a73e8;color:white;padding:2px 10px;border-radius:12px;
-                         font-size:.8em;font-weight:600;">שאלה {i}</span>
+                         font-size:.8em;font-weight:600;">{L['q']} {i}</span>
             <span style="font-size:.85em;color:#888;margin-right:8px;">{u['content'][:120]}</span>
           </div>
           <div style="background:#f8f9fa;border-radius:8px;padding:14px 18px;margin-bottom:6px;
@@ -1640,13 +1689,13 @@ def export_report_html(messages: list, title: str = "Analysis Report") -> bytes:
         </div>""")
 
     html = f"""<!DOCTYPE html>
-<html lang="he" dir="rtl">
+<html lang="{L['lang']}" dir="{L['dir']}">
 <head>
   <meta charset="utf-8">
   <title>{title}</title>
   <style>
     body{{font-family:'Segoe UI',Arial,sans-serif;max-width:860px;margin:40px auto;
-         padding:0 20px;color:#222;background:#fff;direction:rtl;}}
+         padding:0 20px;color:#222;background:#fff;direction:{L['dir']};}}
     h1{{color:#1a73e8;border-bottom:3px solid #1a73e8;padding-bottom:10px;}}
     .meta{{color:#888;font-size:.9em;margin-bottom:32px;}}
     .stat{{display:inline-block;background:#e8f0fe;color:#1a73e8;padding:4px 14px;
@@ -1656,15 +1705,15 @@ def export_report_html(messages: list, title: str = "Analysis Report") -> bytes:
 <body>
   <h1>📊 {title}</h1>
   <div class="meta">
-    נוצר: {now}
+    {L['created']}: {now}
     &nbsp;·&nbsp;
-    <span class="stat">💬 {len(user_turns)} שאלות</span>
-    <span class="stat">📈 {n_charts} גרפים</span>
-    <span class="stat">🔎 {n_code} קטעי קוד</span>
+    <span class="stat">💬 {len(user_turns)} {L['questions']}</span>
+    <span class="stat">📈 {n_charts} {L['charts']}</span>
+    <span class="stat">🔎 {n_code} {L['snippets']}</span>
   </div>
   {''.join(rows_html)}
   <p style="color:#aaa;font-size:.8em;text-align:center;margin-top:40px;">
-    נוצר על ידי Data Analyst Chatbot · {now}
+    {L['footer']} Data Analyst Chatbot · {now}
   </p>
 </body>
 </html>"""
@@ -2779,6 +2828,7 @@ def build_chat():
 
     chat.register_tool(tools.get_data_overview)
     chat.register_tool(tools.run_analysis)
+    chat.register_tool(tools.run_sql)
     chat.register_tool(tools.create_chart)
     chat.register_tool(tools.suggest_next_analyses)
     return chat
@@ -3130,7 +3180,7 @@ def _init_dataset(df, name: str, file_id, T: dict) -> None:
     st.session_state._uploaded_file_id  = file_id
     st.session_state.chat               = None
     st.session_state.dashboard_charts   = []
-    st.session_state.data_warnings      = validate_dataframe(df)
+    st.session_state.data_warnings      = validate_dataframe(df, lang=st.session_state.get("lang", "he"))
     # Clear AI Dashboard state
     st.session_state.ai_dashboard_charts = []
     st.session_state.ai_dash_messages    = []
@@ -3346,8 +3396,37 @@ def _render_onboarding_chat(T: dict) -> None:
                 _handle_demo_data(T)
 
 
+_FOLLOWUP_BULLET_RE = re.compile(r"^(?:[\-\*•]|\d+[.)])\s*")
+_FOLLOWUP_BOLD_RE = re.compile(r"\*{1,2}(.*?)\*{1,2}")
+
+
+def _extract_followups(text: str) -> list[str]:
+    """Parse follow-up questions from the AI response's '➡️ Follow-up' section."""
+    if not text:
+        return []
+    marker_idx = text.find("➡️")
+    if marker_idx == -1:
+        return []
+    questions: list[str] = []
+    for line in text[marker_idx:].split("\n")[1:]:
+        stripped = line.strip()
+        if not stripped:
+            continue
+        if stripped.startswith("#"):
+            break
+        cleaned = _FOLLOWUP_BOLD_RE.sub(r"\1", _FOLLOWUP_BULLET_RE.sub("", stripped)).strip()
+        if len(cleaned) > 5:
+            questions.append(cleaned)
+    return questions[:5]
+
+
 def _build_context_chips(T: dict) -> list[str]:
     """Generate context-aware analysis suggestions based on the loaded dataset."""
+    # Use follow-ups parsed from the last AI response if available
+    context_chips = st.session_state.get("_context_chips")
+    if context_chips:
+        return context_chips
+
     df = tools.get_dataframe()
     if df is None:
         return T.get("quick_qs", [])[:5]
@@ -3507,6 +3586,27 @@ def render_sidebar(T: dict) -> None:
             st.session_state._streaming_target = None
             st.rerun()
 
+        if st.session_state.get("data_loaded"):
+            if st.button(
+                T["change_data_btn"],
+                use_container_width=True,
+                key="change_data_btn_sidebar",
+            ):
+                st.session_state.data_loaded = False
+                st.session_state._uploaded_file_id = None
+                st.session_state._summary_df = None
+                st.session_state._summary_name = None
+                st.session_state.messages = []
+                st.session_state.chat = None
+                st.session_state.current_chat_id = None
+                st.session_state.dashboard_charts = []
+                st.session_state.ai_dashboard_charts = []
+                st.session_state.ai_dash_messages = []
+                st.session_state.ai_dash_chat = None
+                tools.set_dataframe(None)
+                tools.clear_ai_dashboard_charts()
+                st.rerun()
+
         st.markdown("---")
 
         # ── Conversations ─────────────────────────────────────────────────
@@ -3593,10 +3693,10 @@ def render_sidebar(T: dict) -> None:
 
         st.markdown("---")
 
-        # ── Language toggle (standalone) ──────────────────────────────────
-        if st.button(T["lang_btn"], use_container_width=True, key="lang_toggle"):
-            st.session_state.lang = "en" if st.session_state.lang == "he" else "he"
-            st.rerun()
+        # ── Language toggle (disabled — English-only for now; code preserved for later) ──
+        # if st.button(T["lang_btn"], use_container_width=True, key="lang_toggle"):
+        #     st.session_state.lang = "en" if st.session_state.lang == "he" else "he"
+        #     st.rerun()
 
         # ── Theme toggle (disabled — dark-only for now; see README to re-enable) ──
         # _theme_label = T["theme_btn_light"] if st.session_state.theme == "dark" else T["theme_btn_dark"]
@@ -3805,7 +3905,7 @@ def render_history() -> None:
                             })
                         st.toast(T["chart_added_from_chat"])
 
-            # ── Code panel (analysis + chart tabs) ───────────────────────
+            # ── Code panel (analysis + sql + chart tabs) ─────────────────
             _snippets = msg.get("code_snippets", [])
             if _snippets and st.session_state.get("show_code_panels", True):
                 # Normalise: support legacy str format and new dict format
@@ -3814,6 +3914,11 @@ def render_history() -> None:
                     for s in _snippets
                     if not isinstance(s, dict) or s.get("type") == "analysis"
                 ]
+                _sql_code = [
+                    s["code"]
+                    for s in _snippets
+                    if isinstance(s, dict) and s.get("type") == "sql"
+                ]
                 _charts_code = [
                     s["code"]
                     for s in _snippets
@@ -3821,20 +3926,37 @@ def render_history() -> None:
                 ]
                 with st.expander(T["code_panel_lbl"], expanded=True):
                     st.caption(T["code_panel_hint"])
-                    if _analysis and _charts_code:
-                        # Two tabs: data query + chart code
-                        _tab_a, _tab_c = st.tabs(
-                            [T["code_tab_analysis"], T["code_tab_chart"]]
-                        )
-                        with _tab_a:
-                            for _snip in _analysis:
-                                st.code(_snip, language="python")
-                        with _tab_c:
-                            for _snip in _charts_code:
-                                st.code(_snip, language="python")
+                    # Build tab list dynamically
+                    _tab_names = []
+                    _tab_types = []
+                    if _analysis:
+                        _tab_names.append(T["code_tab_analysis"])
+                        _tab_types.append("analysis")
+                    if _sql_code:
+                        _tab_names.append(T["code_tab_sql"])
+                        _tab_types.append("sql")
+                    if _charts_code:
+                        _tab_names.append(T["code_tab_chart"])
+                        _tab_types.append("chart")
+                    if len(_tab_names) > 1:
+                        _tabs = st.tabs(_tab_names)
+                        for _tab, _ttype in zip(_tabs, _tab_types):
+                            with _tab:
+                                if _ttype == "analysis":
+                                    for _snip in _analysis:
+                                        st.code(_snip, language="python")
+                                elif _ttype == "sql":
+                                    for _snip in _sql_code:
+                                        st.code(_snip, language="sql")
+                                else:
+                                    for _snip in _charts_code:
+                                        st.code(_snip, language="python")
                     elif _analysis:
                         for _snip in _analysis:
                             st.code(_snip, language="python")
+                    elif _sql_code:
+                        for _snip in _sql_code:
+                            st.code(_snip, language="sql")
                     else:
                         for _snip in _charts_code:
                             st.code(_snip, language="python")
@@ -3971,6 +4093,39 @@ def main() -> None:
                 _render_quick_chips(T, context_aware=False)
             else:
                 render_history()
+
+            # After a response completes, scroll so chat input is visible
+            if st.session_state.pop("_scroll_after_response", False):
+                import streamlit.components.v1 as _components
+                _components.html("""<script>
+                (function() {
+                    var doc = window.parent.document;
+                    function doScroll() {
+                        // Try all known Streamlit scrollable containers
+                        var selectors = [
+                            '[data-testid="stMainBlockContainer"]',
+                            '[data-testid="stAppViewContainer"]',
+                            'section.main',
+                            '.main .block-container',
+                            '.main'
+                        ];
+                        for (var i = 0; i < selectors.length; i++) {
+                            var el = doc.querySelector(selectors[i]);
+                            if (el && el.scrollHeight > el.clientHeight) {
+                                el.scrollTop = el.scrollHeight;
+                            }
+                        }
+                        // Also scroll the last chat message into view
+                        var msgs = doc.querySelectorAll('[data-testid="stChatMessage"]');
+                        if (msgs.length > 0) {
+                            msgs[msgs.length - 1].scrollIntoView({behavior: 'instant', block: 'end'});
+                        }
+                    }
+                    setTimeout(doScroll, 100);
+                    setTimeout(doScroll, 400);
+                    setTimeout(doScroll, 800);
+                })();
+                </script>""", height=0)
 
         # ── Recover from interrupted streaming ─────────────────────────
         if st.session_state._is_streaming and st.session_state._streaming_target == "chat":
@@ -4145,8 +4300,10 @@ def main() -> None:
                     _save_chat(st.session_state.current_chat_id, _msgs, _chat_name)
                 except Exception as _save_err:
                     _logger.warning("Chat save failed: %s", _save_err)
-            # Chips: re-show after each AI response
+            # Chips: parse follow-ups from AI response, re-show after each reply
+            st.session_state._context_chips = _extract_followups(full_text or "")
             st.session_state.chips_hidden = False
+            st.session_state._scroll_after_response = True
             # Rerun so render_history() re-renders with the new message
             # (icons + chips appear after the last assistant reply)
             st.rerun()
@@ -4553,20 +4710,21 @@ def main() -> None:
                         if idx < len(charts_list):
                             c = charts_list[idx]
                             with cols[j]:
-                                lbl = c.get("title") or f"{c.get('type','גרף')} – {c.get('x','')}"
+                                _ctype_disp = _chart_type_label(c.get("type", T["chart_fallback"]))
+                                lbl = c.get("title") or f"{_ctype_disp} – {c.get('x','')}"
                                 st.markdown(f"**{lbl}**")
                                 if c.get("type") == "image":
                                     img_p = Path(c.get("path", ""))
                                     if img_p.exists():
                                         st.image(str(img_p), use_container_width=True)
                                     else:
-                                        st.warning("תמונה לא נמצאה")
+                                        st.warning(T["image_not_found"])
                                 else:
                                     try:
                                         fig = build_chart(c, df_now, sample_size=c.get("sample_size", 500))
                                         st.plotly_chart(fig, use_container_width=True, key=f"dash_{idx}")
                                     except Exception as e:
-                                        st.error(f"שגיאה: {e}")
+                                        st.error(f'{T["chart_error_short"]}: {e}')
                                 if st.button(T["dash_remove"], key=f"rm_dash_{idx}", use_container_width=True):
                                     st.session_state.dashboard_charts.pop(idx)
                                     st.rerun()

@@ -163,3 +163,55 @@ def test_create_chart_no_data(monkeypatch):
 def test_suggest_next_analyses_returns_string():
     result = tools.suggest_next_analyses()
     assert isinstance(result, str) and len(result) > 10
+
+
+# ─── run_sql ─────────────────────────────────────────────────────────────────
+
+def test_run_sql_basic_select(sample_df):
+    result = tools.run_sql("SELECT product, sales FROM df LIMIT 5")
+    assert "A" in result or "B" in result or "C" in result
+
+
+def test_run_sql_aggregation(sample_df):
+    result = tools.run_sql(
+        "SELECT product, SUM(sales) AS total FROM df GROUP BY product ORDER BY total DESC"
+    )
+    assert "A" in result
+
+
+def test_run_sql_where(sample_df):
+    result = tools.run_sql("SELECT * FROM df WHERE sales > 500 LIMIT 10")
+    assert isinstance(result, str) and len(result) > 0
+
+
+def test_run_sql_count(sample_df):
+    result = tools.run_sql("SELECT COUNT(*) AS cnt FROM df")
+    assert "100" in result
+
+
+def test_run_sql_blocks_ddl(sample_df):
+    result = tools.run_sql("DROP TABLE df")
+    assert "Only SELECT" in result
+
+
+def test_run_sql_blocks_insert(sample_df):
+    result = tools.run_sql("INSERT INTO df VALUES ('X', 1, 'Jan', 1)")
+    assert "Only SELECT" in result
+
+
+def test_run_sql_no_data():
+    tools._df = None
+    result = tools.run_sql("SELECT * FROM df")
+    assert "No dataset" in result
+
+
+def test_run_sql_invalid_syntax(sample_df):
+    result = tools.run_sql("SELEC * FORM df")
+    assert "SQL Error" in result
+
+
+def test_run_sql_snippet_tracked(sample_df):
+    tools._pending_code_snippets.clear()
+    tools.run_sql("SELECT product FROM df LIMIT 1")
+    snippets = tools.get_pending_code_snippets()
+    assert any(s.get("type") == "sql" for s in snippets)
