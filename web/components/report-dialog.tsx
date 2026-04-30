@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
-import { Download, FileText, Loader2 } from "lucide-react";
+import { Download, FileText, Loader2, Send } from "lucide-react";
 import {
   Dialog,
   DialogContent,
@@ -14,6 +14,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { toast } from "sonner";
 import { api, type ReportDoc } from "@/lib/api";
+import { downloadHRB } from "@/lib/hrb-export";
 import { ReportView, REPORT_STYLES, reportToStandaloneHTML } from "./report-view";
 
 export function ReportDialog({
@@ -84,6 +85,14 @@ export function ReportDialog({
     toast.success("ReportDoc JSON copied to clipboard");
   }
 
+  function downloadForReportBuilder() {
+    if (!report) return;
+    downloadHRB(report, { title, subtitle, author, lang: "en" });
+    toast.success(
+      "Saved .hrb.json — open reports.noamkeshet.com → Import → choose this file",
+    );
+  }
+
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent className="max-w-5xl max-h-[90vh] overflow-y-auto">
@@ -130,12 +139,15 @@ export function ReportDialog({
           </div>
         </div>
 
-        <DialogFooter className="gap-2">
+        <DialogFooter className="gap-2 flex-wrap">
           <Button variant="outline" onClick={copyJSON} disabled={!report}>
             <FileText className="h-4 w-4" /> Copy JSON
           </Button>
-          <Button onClick={downloadHTML} disabled={!report}>
+          <Button variant="outline" onClick={downloadHTML} disabled={!report}>
             <Download className="h-4 w-4" /> Download HTML
+          </Button>
+          <Button onClick={downloadForReportBuilder} disabled={!report}>
+            <Send className="h-4 w-4" /> Export for Report Builder
           </Button>
         </DialogFooter>
       </DialogContent>
