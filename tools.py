@@ -5,6 +5,7 @@ Module-level state is shared within a single Streamlit session.
 
 import io
 import json
+import re
 import traceback
 from pathlib import Path
 from typing import Optional
@@ -15,6 +16,7 @@ import matplotlib.pyplot as plt
 import seaborn as sns
 import numpy as np
 import pandas as pd
+import duckdb
 
 # ─── Module State ─────────────────────────────────────────────────────────────
 
@@ -22,7 +24,7 @@ _df: Optional[pd.DataFrame] = None
 _data_name: str = ""
 _pending_charts: list[Path] = []        # Charts waiting to be shown in the UI
 _pending_chart_configs: list[dict] = [] # Config dicts (type, x, y, …) per chart
-_pending_code_snippets: list[dict] = []  # {"type": "analysis"|"chart", "code": str}
+_pending_code_snippets: list[dict] = []  # {"type": "analysis"|"chart"|"sql", "code": str}
 _charts_dir = Path(__file__).parent / "charts"
 _charts_dir.mkdir(exist_ok=True)
 
@@ -135,7 +137,7 @@ def get_pending_chart_configs() -> list[dict]:
 
 def get_pending_code_snippets() -> list[dict]:
     """Return code snippets since the last call, then clear the queue.
-    Each item: {"type": "analysis"|"chart", "code": str}
+    Each item: {"type": "analysis"|"chart"|"sql", "code": str}
     """
     snippets = list(_pending_code_snippets)
     _pending_code_snippets.clear()
@@ -190,6 +192,11 @@ def get_data_overview() -> str:
 
     buf.write("Sample (first 5 rows):\n")
     buf.write(_df.head(5).to_string(index=False))
+
+    buf.write("\n\nSQL access: query the table named \"df\" using run_sql().\n")
+    cols_hint = ", ".join(f'"{c}"' for c in _df.columns)
+    buf.write(f"Columns: {cols_hint}\n")
+
     return buf.getvalue()
 
 
@@ -225,6 +232,46 @@ def run_analysis(pandas_code: str) -> str:
         return str(result)
     except Exception:
         return f"Error:\n{traceback.format_exc()}"
+
+
+# ─── SQL via DuckDB ──────────────────────────────────────────────────────────
+
+_SQL_FORBIDDEN = re.compile(
+    r"\b(CREATE|DROP|ALTER|INSERT|UPDATE|DELETE|ATTACH|COPY|EXPORT|IMPORT|INSTALL|LOAD|CALL|PRAGMA)\b",
+    re.IGNORECASE,
+)
+
+
+def run_sql(sql_query: str) -> str:
+    """
+    Run a read-only SQL query on the dataset using DuckDB.
+    The table name is "df". Column names with spaces or special characters
+    must be quoted with double-quotes.
+
+    Examples:
+        "SELECT product, SUM(revenue) AS total FROM df GROUP BY product ORDER BY total DESC LIMIT 10"
+        "SELECT * FROM df WHERE age > 30 AND city = 'Tel Aviv'"
+        "SELECT CORR(price, quantity) FROM df"
+        "SELECT month, AVG(sales) FROM df GROUP BY month"
+    """
+    if _df is None:
+        return "⚠️ No dataset loaded."
+
+    if _SQL_FORBIDDEN.search(sql_query):
+        return "⚠️ Only SELECT queries are allowed. DDL/DML statements are blocked."
+
+    _pending_code_snippets.append({"type": "sql", "code": sql_query.strip()})
+    con = duckdb.connect(":memory:")
+    try:
+        con.register("df", _df)
+        result = con.execute(sql_query).fetchdf()
+    except Exception as e:
+        return f"SQL Error: {e}"
+    finally:
+        con.close()
+    if result.empty:
+        return "(Query returned no rows)"
+    return result.to_string(max_rows=50, max_cols=20, index=False)
 
 
 def create_chart(
