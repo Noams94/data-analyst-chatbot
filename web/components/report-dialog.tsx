@@ -13,7 +13,7 @@ import {
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { toast } from "sonner";
-import { api, type ReportDoc } from "@/lib/api";
+import { useApi, type ReportDoc } from "@/lib/api";
 import { downloadHRB } from "@/lib/hrb-export";
 import { ReportView, REPORT_STYLES, reportToStandaloneHTML } from "./report-view";
 
@@ -28,6 +28,7 @@ export function ReportDialog({
   onOpenChange: (open: boolean) => void;
   defaultTitle: string;
 }) {
+  const api = useApi();
   const [report, setReport] = useState<ReportDoc | null>(null);
   const [loading, setLoading] = useState(false);
   const [title, setTitle] = useState(defaultTitle);

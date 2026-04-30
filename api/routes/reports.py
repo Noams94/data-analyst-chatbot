@@ -10,28 +10,30 @@ from __future__ import annotations
 
 import base64
 from datetime import datetime, timezone
-from pathlib import Path
 
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, Depends, HTTPException
 
 from api import state
+from api.auth import get_current_user_id
 
 router = APIRouter(tags=["reports"])
 
 
-def _data_url_from_path(path: Path) -> str:
-    if not path.exists():
+def _data_url_from_bytes(data: bytes) -> str:
+    if not data:
         return ""
-    raw = path.read_bytes()
-    return f"data:image/png;base64,{base64.b64encode(raw).decode('ascii')}"
+    return f"data:image/png;base64,{base64.b64encode(data).decode('ascii')}"
 
 
 @router.get("/chats/{chat_id}/report")
-async def build_report(chat_id: str) -> dict:
-    chat = state.get_chat(chat_id)
+async def build_report(
+    chat_id: str,
+    user_id: str = Depends(get_current_user_id),
+) -> dict:
+    chat = state.get_chat(chat_id, user_id)
     if not chat:
         raise HTTPException(404, "Chat not found")
-    dataset = state.get_dataset(chat.dataset_id)
+    dataset = state.get_dataset(chat.dataset_id, user_id)
 
     # Build sections from pinned (user, assistant) pairs in order.
     sections: list[dict] = []
@@ -50,7 +52,7 @@ async def build_report(chat_id: str) -> dict:
                         "id": c.id,
                         "title": c.title,
                         "chartType": c.chart_type,
-                        "dataUrl": _data_url_from_path(c.path),
+                        "dataUrl": _data_url_from_bytes(c.image_bytes),
                     }
                     for c in m.charts
                 ],

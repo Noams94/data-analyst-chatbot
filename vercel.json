@@ -1,11 +1,7 @@
 {
   "$schema": "https://openapi.vercel.sh/vercel.json",
   "experimentalServices": {
-    "web": {
-      "src": "web"
-    },
-    "api": {
-      "src": "api"
-    }
+    "web": { "src": "web" },
+    "api": { "src": "api" }
   }
 }

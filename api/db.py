@@ -18,6 +18,7 @@ from sqlalchemy import (
     DateTime,
     ForeignKey,
     Integer,
+    LargeBinary,
     String,
     Text,
     create_engine,
@@ -57,6 +58,7 @@ class Dataset(Base):
     __tablename__ = "datasets"
 
     id: Mapped[str] = mapped_column(String(36), primary_key=True)
+    user_id: Mapped[str] = mapped_column(String(64), index=True, default="anonymous")
     name: Mapped[str] = mapped_column(String(255))
     parquet_path: Mapped[str] = mapped_column(String(512))
     columns: Mapped[list] = mapped_column(JSON)
@@ -69,6 +71,7 @@ class Chat(Base):
     __tablename__ = "chats"
 
     id: Mapped[str] = mapped_column(String(36), primary_key=True)
+    user_id: Mapped[str] = mapped_column(String(64), index=True, default="anonymous")
     dataset_id: Mapped[str] = mapped_column(String(36), ForeignKey("datasets.id", ondelete="CASCADE"))
     title: Mapped[str] = mapped_column(String(255), default="New chat")
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_now_utc)
@@ -109,7 +112,13 @@ class Chart(Base):
 
     id: Mapped[str] = mapped_column(String(36), primary_key=True)
     message_id: Mapped[str] = mapped_column(String(36), ForeignKey("messages.id", ondelete="CASCADE"))
-    path: Mapped[str] = mapped_column(String(512))
+    # PNG bytes kept in the DB so the API doesn't need a persistent filesystem.
+    # ~20 KB per chart — fine for an internal tool's volume.
+    image_bytes: Mapped[bytes] = mapped_column(LargeBinary, default=b"")
+    # Deprecated. Kept only to satisfy the legacy NOT NULL constraint on
+    # existing SQLite DBs (SQLite can't drop columns easily). Always written as
+    # empty string for new rows; reads come from image_bytes.
+    path: Mapped[str] = mapped_column(String(512), default="")
     title: Mapped[str] = mapped_column(String(512), default="")
     chart_type: Mapped[str] = mapped_column(String(64), default="")
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_now_utc)
@@ -147,15 +156,49 @@ def init_db() -> None:
     """
     Base.metadata.create_all(engine)
 
-    # Tiny ad-hoc migration: the `pinned` column was added after initial
-    # rollout. If an existing DB doesn't have it yet, add it.
     insp = sqla_inspect(engine)
-    cols = {c["name"] for c in insp.get_columns("messages")}
-    if "pinned" not in cols:
+
+    # Migration: messages.pinned (added after initial rollout).
+    msg_cols = {c["name"] for c in insp.get_columns("messages")}
+    if "pinned" not in msg_cols:
         with engine.begin() as conn:
             conn.execute(text(
                 "ALTER TABLE messages ADD COLUMN pinned BOOLEAN NOT NULL DEFAULT 1"
             ))
+
+    # Migration: user_id on datasets + chats. Existing rows get "anonymous".
+    for table_name in ("datasets", "chats"):
+        cols = {c["name"] for c in insp.get_columns(table_name)}
+        if "user_id" not in cols:
+            with engine.begin() as conn:
+                conn.execute(text(
+                    f"ALTER TABLE {table_name} ADD COLUMN user_id VARCHAR(64) "
+                    f"NOT NULL DEFAULT 'anonymous'"
+                ))
+
+    # Migration: charts.image_bytes — when the column was added we may have
+    # legacy rows with `path` pointing at on-disk PNGs. Backfill those once.
+    chart_cols = {c["name"] for c in insp.get_columns("charts")}
+    legacy_path_col_exists = "path" in chart_cols
+    if "image_bytes" not in chart_cols:
+        with engine.begin() as conn:
+            conn.execute(text("ALTER TABLE charts ADD COLUMN image_bytes BLOB"))
+        if legacy_path_col_exists:
+            from pathlib import Path as _P
+            with engine.begin() as conn:
+                rows = conn.execute(text(
+                    "SELECT id, path FROM charts WHERE image_bytes IS NULL OR length(image_bytes) = 0"
+                )).fetchall()
+                for cid, p in rows:
+                    if p and _P(p).exists():
+                        try:
+                            data = _P(p).read_bytes()
+                        except OSError:
+                            continue
+                        conn.execute(
+                            text("UPDATE charts SET image_bytes = :b WHERE id = :id"),
+                            {"b": data, "id": cid},
+                        )
 
 
 def get_session() -> Session:

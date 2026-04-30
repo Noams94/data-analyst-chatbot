@@ -9,12 +9,13 @@ import { ReportDialog } from "@/components/report-dialog";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { useChatStream } from "@/lib/use-chat-stream";
-import { api, type DatasetSummary } from "@/lib/api";
+import { useApi, type DatasetSummary } from "@/lib/api";
 
 export default function AppHome() {
   const [dataset, setDataset] = useState<DatasetSummary | null>(null);
   const [chatId, setChatId] = useState<string | null>(null);
   const [reportOpen, setReportOpen] = useState(false);
+  const api = useApi();
   const { state, send, stop, reset, setPinned } = useChatStream();
   const scrollerRef = useRef<HTMLDivElement>(null);
 
@@ -39,7 +40,7 @@ export default function AppHome() {
     return () => {
       cancelled = true;
     };
-  }, [reset]);
+  }, [api, reset]);
 
   // After upload, immediately create a chat so the user can start typing,
   // and reflect the chatId in the URL for refresh-survival.
@@ -56,7 +57,7 @@ export default function AppHome() {
     return () => {
       cancelled = true;
     };
-  }, [dataset, chatId]);
+  }, [api, dataset, chatId]);
 
   // Scroll to bottom on new content.
   useEffect(() => {

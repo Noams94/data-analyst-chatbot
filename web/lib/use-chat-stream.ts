@@ -14,7 +14,7 @@
  */
 
 import { useCallback, useReducer, useRef } from "react";
-import { api, type ChartPart, type MessageDTO, type SnippetPart } from "./api";
+import { useApi, type ChartPart, type MessageDTO, type SnippetPart } from "./api";
 
 export type StreamingMessage = {
   id: string;          // local placeholder until `done` brings the server id
@@ -144,6 +144,7 @@ function parseSseChunk(buffer: string): { events: { event: string; data: string 
 }
 
 export function useChatStream(initialMessages: MessageDTO[] = []) {
+  const api = useApi();
   const [state, dispatch] = useReducer(reducer, { messages: initialMessages, streaming: null });
   const abortRef = useRef<AbortController | null>(null);
 
@@ -162,9 +163,14 @@ export function useChatStream(initialMessages: MessageDTO[] = []) {
     dispatch({ type: "stream_start", tempId: tempStreamId });
 
     try {
+      const auth = await api.authHeader();
       const res = await fetch(api.messagesEndpoint(chatId), {
         method: "POST",
-        headers: { "Content-Type": "application/json", Accept: "text/event-stream" },
+        headers: {
+          "Content-Type": "application/json",
+          Accept: "text/event-stream",
+          ...auth,
+        },
         body: JSON.stringify({ content }),
         signal: ctrl.signal,
       });
@@ -224,7 +230,7 @@ export function useChatStream(initialMessages: MessageDTO[] = []) {
       dispatch({ type: "error", message: (e as Error).message });
       dispatch({ type: "done", messageId: tempStreamId });
     }
-  }, []);
+  }, [api]);
 
   const stop = useCallback(() => {
     abortRef.current?.abort();
@@ -238,7 +244,7 @@ export function useChatStream(initialMessages: MessageDTO[] = []) {
     } catch {
       dispatch({ type: "set_pinned", messageId, pinned: !pinned });
     }
-  }, []);
+  }, [api]);
 
   return { state, send, reset, stop, setPinned };
 }

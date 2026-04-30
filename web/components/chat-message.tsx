@@ -13,7 +13,6 @@ import { Card } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import type { ChartPart, MessageDTO, SnippetPart } from "@/lib/api";
 import type { StreamingMessage } from "@/lib/use-chat-stream";
-import { api } from "@/lib/api";
 
 const SNIPPET_LABEL: Record<SnippetPart["type"], string> = {
   analysis: "📊 Analysis code",
@@ -29,7 +28,7 @@ function ChartCard({ chart }: { chart: ChartPart }) {
       ) : null}
       {/* eslint-disable-next-line @next/next/no-img-element */}
       <img
-        src={api.chartUrl(chart.url)}
+        src={chart.dataUrl}
         alt={chart.title || "chart"}
         className="rounded-md border w-full"
       />

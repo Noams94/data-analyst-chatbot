@@ -6,9 +6,10 @@ import io
 from pathlib import Path
 
 import pandas as pd
-from fastapi import APIRouter, File, HTTPException, UploadFile
+from fastapi import APIRouter, Depends, File, HTTPException, UploadFile
 
 from api import state
+from api.auth import get_current_user_id
 from api.chat_session import ChatSession, set_session
 from api.tools import get_data_overview
 
@@ -43,7 +44,10 @@ def _to_response(rec: state.DatasetRecord) -> dict:
 
 
 @router.post("")
-async def upload_dataset(file: UploadFile = File(...)) -> dict:
+async def upload_dataset(
+    file: UploadFile = File(...),
+    user_id: str = Depends(get_current_user_id),
+) -> dict:
     raw = await file.read()
     if not raw:
         raise HTTPException(400, "Empty file")
@@ -56,13 +60,18 @@ async def upload_dataset(file: UploadFile = File(...)) -> dict:
     except Exception as e:
         raise HTTPException(400, f"Failed to parse file: {e}")
 
-    rec = state.create_dataset(name=file.filename or "uploaded_data", df=df, size_bytes=len(raw))
+    rec = state.create_dataset(
+        user_id=user_id,
+        name=file.filename or "uploaded_data",
+        df=df,
+        size_bytes=len(raw),
+    )
     return _to_response(rec)
 
 
 @router.get("/{dataset_id}/overview")
-async def overview(dataset_id: str) -> dict:
-    rec = state.get_dataset(dataset_id)
+async def overview(dataset_id: str, user_id: str = Depends(get_current_user_id)) -> dict:
+    rec = state.get_dataset(dataset_id, user_id)
     if not rec:
         raise HTTPException(404, "Dataset not found")
     df = state.load_dataframe(rec.parquet_path)
@@ -71,8 +80,8 @@ async def overview(dataset_id: str) -> dict:
 
 
 @router.get("/{dataset_id}")
-async def get_dataset(dataset_id: str) -> dict:
-    rec = state.get_dataset(dataset_id)
+async def get_dataset(dataset_id: str, user_id: str = Depends(get_current_user_id)) -> dict:
+    rec = state.get_dataset(dataset_id, user_id)
     if not rec:
         raise HTTPException(404, "Dataset not found")
     return _to_response(rec)

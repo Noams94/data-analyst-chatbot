@@ -7,11 +7,12 @@ import os
 import traceback
 from typing import AsyncIterator
 
-from fastapi import APIRouter, HTTPException
-from fastapi.responses import FileResponse, StreamingResponse
+from fastapi import APIRouter, Depends, HTTPException
+from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
 
 from api import state, tools
+from api.auth import get_current_user_id
 from api.chat_session import ChatSession, set_session
 from api.prompts import SYSTEM_PROMPT_EN
 from api.sse import sse
@@ -61,16 +62,19 @@ class PostMessageBody(BaseModel):
 
 
 @router.post("/chats")
-async def create_chat(body: CreateChatBody) -> dict:
-    chat = state.create_chat(body.dataset_id)
+async def create_chat(
+    body: CreateChatBody,
+    user_id: str = Depends(get_current_user_id),
+) -> dict:
+    chat = state.create_chat(user_id, body.dataset_id)
     if not chat:
         raise HTTPException(404, "Dataset not found")
     return {"id": chat.id, "datasetId": chat.dataset_id, "title": chat.title}
 
 
 @router.get("/chats/{chat_id}")
-async def get_chat(chat_id: str) -> dict:
-    chat = state.get_chat(chat_id)
+async def get_chat(chat_id: str, user_id: str = Depends(get_current_user_id)) -> dict:
+    chat = state.get_chat(chat_id, user_id)
     if not chat:
         raise HTTPException(404, "Chat not found")
     return {
@@ -82,11 +86,15 @@ async def get_chat(chat_id: str) -> dict:
 
 
 @router.post("/chats/{chat_id}/messages")
-async def post_message(chat_id: str, body: PostMessageBody) -> StreamingResponse:
-    chat = state.get_chat(chat_id)
+async def post_message(
+    chat_id: str,
+    body: PostMessageBody,
+    user_id: str = Depends(get_current_user_id),
+) -> StreamingResponse:
+    chat = state.get_chat(chat_id, user_id)
     if not chat:
         raise HTTPException(404, "Chat not found")
-    df = state.get_dataset_dataframe(chat.dataset_id)
+    df = state.get_dataset_dataframe(chat.dataset_id, user_id)
     if df is None:
         raise HTTPException(404, "Dataset not found")
 
@@ -95,10 +103,10 @@ async def post_message(chat_id: str, body: PostMessageBody) -> StreamingResponse
     assistant_id = state.create_assistant_placeholder(chat_id)
 
     # Re-fetch so history reflects what's now in the DB.
-    chat = state.get_chat(chat_id)
+    chat = state.get_chat(chat_id, user_id)
     history = _history_turns(chat)
 
-    dataset = state.get_dataset(chat.dataset_id)
+    dataset = state.get_dataset(chat.dataset_id, user_id)
     session = ChatSession(chat_id=chat_id, df=df, data_name=dataset.name if dataset else "")
 
     async def stream() -> AsyncIterator[str]:
@@ -125,9 +133,14 @@ async def post_message(chat_id: str, body: PostMessageBody) -> StreamingResponse
                             chart_type = cfg.get("chart_type", "")
                             break
                     rec = state.append_chart(assistant_id, path, title, chart_type)
+                    import base64 as _b64
+                    data_url = (
+                        f"data:image/png;base64,{_b64.b64encode(rec.image_bytes).decode('ascii')}"
+                        if rec.image_bytes else ""
+                    )
                     events.append(sse("chart", {
                         "id": rec.id,
-                        "url": f"/charts/{rec.id}",
+                        "dataUrl": data_url,
                         "title": title,
                         "chartType": chart_type,
                     }))
@@ -171,9 +184,6 @@ async def post_message(chat_id: str, body: PostMessageBody) -> StreamingResponse
     )
 
 
-@router.get("/charts/{chart_id}")
-async def get_chart(chart_id: str) -> FileResponse:
-    rec = state.get_chart(chart_id)
-    if not rec or not rec.path.exists():
-        raise HTTPException(404, "Chart not found")
-    return FileResponse(rec.path, media_type="image/png")
+# Note: /charts/:id used to serve the PNG. It's been retired in favor of
+# inlining the data URL directly into SSE events and chat-fetch responses,
+# so <img> tags work without an auth round-trip.

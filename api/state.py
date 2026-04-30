@@ -34,6 +34,7 @@ def load_dataframe(parquet_path: str) -> pd.DataFrame:
 @dataclass
 class DatasetRecord:
     id: str
+    user_id: str
     name: str
     columns: list[str]
     row_count: int
@@ -45,6 +46,7 @@ class DatasetRecord:
 def _dataset_to_record(d: db.Dataset) -> DatasetRecord:
     return DatasetRecord(
         id=d.id,
+        user_id=d.user_id,
         name=d.name,
         columns=list(d.columns or []),
         row_count=d.row_count,
@@ -54,13 +56,14 @@ def _dataset_to_record(d: db.Dataset) -> DatasetRecord:
     )
 
 
-def create_dataset(name: str, df: pd.DataFrame, size_bytes: int) -> DatasetRecord:
+def create_dataset(user_id: str, name: str, df: pd.DataFrame, size_bytes: int) -> DatasetRecord:
     dataset_id = new_id()
     parquet_path = str(db.DATASETS_DIR / f"{dataset_id}.parquet")
     df.to_parquet(parquet_path, index=False)
     with db.get_session() as s:
         row = db.Dataset(
             id=dataset_id,
+            user_id=user_id,
             name=name,
             parquet_path=parquet_path,
             columns=df.columns.astype(str).tolist(),
@@ -73,14 +76,16 @@ def create_dataset(name: str, df: pd.DataFrame, size_bytes: int) -> DatasetRecor
         return _dataset_to_record(row)
 
 
-def get_dataset(dataset_id: str) -> DatasetRecord | None:
+def get_dataset(dataset_id: str, user_id: str) -> DatasetRecord | None:
     with db.get_session() as s:
         row = s.get(db.Dataset, dataset_id)
-        return _dataset_to_record(row) if row else None
+        if row and row.user_id == user_id:
+            return _dataset_to_record(row)
+        return None
 
 
-def get_dataset_dataframe(dataset_id: str) -> pd.DataFrame | None:
-    rec = get_dataset(dataset_id)
+def get_dataset_dataframe(dataset_id: str, user_id: str) -> pd.DataFrame | None:
+    rec = get_dataset(dataset_id, user_id)
     if not rec:
         return None
     return load_dataframe(rec.parquet_path)
@@ -92,7 +97,7 @@ def get_dataset_dataframe(dataset_id: str) -> pd.DataFrame | None:
 class ChartRecord:
     id: str
     message_id: str
-    path: Path
+    image_bytes: bytes
     title: str
     chart_type: str
 
@@ -120,6 +125,7 @@ class MessageRecord:
 @dataclass
 class ChatRecord:
     id: str
+    user_id: str
     dataset_id: str
     title: str
     created_at: str
@@ -129,7 +135,8 @@ class ChatRecord:
 
 def _chart_to_record(c: db.Chart) -> ChartRecord:
     return ChartRecord(
-        id=c.id, message_id=c.message_id, path=Path(c.path),
+        id=c.id, message_id=c.message_id,
+        image_bytes=c.image_bytes or b"",
         title=c.title, chart_type=c.chart_type,
     )
 
@@ -150,28 +157,31 @@ def _message_to_record(m: db.Message) -> MessageRecord:
 
 def _chat_to_record(c: db.Chat) -> ChatRecord:
     return ChatRecord(
-        id=c.id, dataset_id=c.dataset_id, title=c.title,
+        id=c.id, user_id=c.user_id, dataset_id=c.dataset_id, title=c.title,
         created_at=c.created_at.isoformat(),
         updated_at=c.updated_at.isoformat(),
         messages=[_message_to_record(m) for m in c.messages],
     )
 
 
-def create_chat(dataset_id: str, title: str = "New chat") -> ChatRecord | None:
+def create_chat(user_id: str, dataset_id: str, title: str = "New chat") -> ChatRecord | None:
     with db.get_session() as s:
-        if not s.get(db.Dataset, dataset_id):
+        ds = s.get(db.Dataset, dataset_id)
+        if not ds or ds.user_id != user_id:
             return None
-        chat = db.Chat(id=new_id(), dataset_id=dataset_id, title=title)
+        chat = db.Chat(id=new_id(), user_id=user_id, dataset_id=dataset_id, title=title)
         s.add(chat)
         s.commit()
         s.refresh(chat)
         return _chat_to_record(chat)
 
 
-def get_chat(chat_id: str) -> ChatRecord | None:
+def get_chat(chat_id: str, user_id: str) -> ChatRecord | None:
     with db.get_session() as s:
         chat = s.get(db.Chat, chat_id)
-        return _chat_to_record(chat) if chat else None
+        if chat and chat.user_id == user_id:
+            return _chat_to_record(chat)
+        return None
 
 
 def add_user_message(chat_id: str, content: str) -> MessageRecord:
@@ -193,18 +203,25 @@ def create_assistant_placeholder(chat_id: str) -> str:
 
 
 def append_chart(message_id: str, source_path: Path, title: str, chart_type: str) -> ChartRecord:
+    """Read the per-request tempfile, persist the PNG bytes in the DB, then
+    delete the tempfile. Cloud-friendly: no persistent filesystem needed.
+    """
     chart_id = new_id()
-    final_path = db.CHARTS_DIR / f"{chart_id}.png"
-    # Move the per-request tempfile into the persistent charts directory.
-    source_path.replace(final_path)
+    image_bytes = source_path.read_bytes()
+    try:
+        source_path.unlink()
+    except OSError:
+        pass
     with db.get_session() as s:
         c = db.Chart(
-            id=chart_id, message_id=message_id, path=str(final_path),
+            id=chart_id, message_id=message_id,
+            image_bytes=image_bytes,
             title=title, chart_type=chart_type,
         )
         s.add(c)
         s.commit()
-    return ChartRecord(id=chart_id, message_id=message_id, path=final_path,
+    return ChartRecord(id=chart_id, message_id=message_id,
+                       image_bytes=image_bytes,
                        title=title, chart_type=chart_type)
 
 
@@ -226,17 +243,30 @@ def finalize_assistant_message(message_id: str, content: str) -> None:
             s.commit()
 
 
-def get_chart(chart_id: str) -> ChartRecord | None:
+def get_chart(chart_id: str, user_id: str) -> ChartRecord | None:
+    """Returns the chart only if it belongs to a chat owned by `user_id`."""
     with db.get_session() as s:
         c = s.get(db.Chart, chart_id)
-        return _chart_to_record(c) if c else None
+        if not c:
+            return None
+        msg = s.get(db.Message, c.message_id)
+        if not msg:
+            return None
+        chat = s.get(db.Chat, msg.chat_id)
+        if not chat or chat.user_id != user_id:
+            return None
+        return _chart_to_record(c)
 
 
-def set_message_pinned(message_id: str, pinned: bool) -> bool:
-    """Toggle a message's `pinned` flag. Returns True iff the row existed."""
+def set_message_pinned(message_id: str, user_id: str, pinned: bool) -> bool:
+    """Toggle pin flag, scoped by ownership. Returns True if the message
+    existed AND is owned by `user_id`."""
     with db.get_session() as s:
         m = s.get(db.Message, message_id)
         if not m:
+            return False
+        chat = s.get(db.Chat, m.chat_id)
+        if not chat or chat.user_id != user_id:
             return False
         m.pinned = pinned
         s.commit()
@@ -244,6 +274,13 @@ def set_message_pinned(message_id: str, pinned: bool) -> bool:
 
 
 # ─── Wire-format helpers ─────────────────────────────────────────────────────
+
+def _data_url(image_bytes: bytes) -> str:
+    if not image_bytes:
+        return ""
+    import base64
+    return f"data:image/png;base64,{base64.b64encode(image_bytes).decode('ascii')}"
+
 
 def message_to_dict(m: MessageRecord) -> dict[str, Any]:
     return {
@@ -253,7 +290,12 @@ def message_to_dict(m: MessageRecord) -> dict[str, Any]:
         "content": m.content,
         "pinned": m.pinned,
         "charts": [
-            {"id": c.id, "url": f"/charts/{c.id}", "title": c.title, "chartType": c.chart_type}
+            {
+                "id": c.id,
+                "dataUrl": _data_url(c.image_bytes),
+                "title": c.title,
+                "chartType": c.chart_type,
+            }
             for c in m.charts
         ],
         "snippets": [

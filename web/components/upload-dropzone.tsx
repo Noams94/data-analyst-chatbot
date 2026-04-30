@@ -3,9 +3,10 @@
 import { useCallback, useRef, useState } from "react";
 import { Upload, Loader2 } from "lucide-react";
 import { Card } from "@/components/ui/card";
-import { api, type DatasetSummary } from "@/lib/api";
+import { useApi, type DatasetSummary } from "@/lib/api";
 
 export function UploadDropzone({ onUploaded }: { onUploaded: (ds: DatasetSummary) => void }) {
+  const api = useApi();
   const inputRef = useRef<HTMLInputElement>(null);
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState<string | null>(null);
@@ -24,7 +25,7 @@ export function UploadDropzone({ onUploaded }: { onUploaded: (ds: DatasetSummary
         setBusy(false);
       }
     },
-    [onUploaded],
+    [api, onUploaded],
   );
 
   return (
