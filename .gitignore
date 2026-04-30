@@ -34,3 +34,40 @@ Thumbs.db
 # Secrets – never commit API keys
 *.env
 secrets.toml
+
+# Node / Next.js / Turborepo (web/)
+node_modules/
+.next/
+.turbo/
+*.tsbuildinfo
+next-env.d.ts
+.env.local
+.env*.local
+
+# pnpm
+.pnpm-store/
+
+# Vercel
+.vercel/
+
+# FastAPI venv + runtime data
+api/.venv/
+api/__pycache__/
+api/**/__pycache__/
+api/data.db
+api/data.db-journal
+api/data/
+
+# Misc untracked artifacts
+.Rhistory
+audit.log
+firebase-debug.log
+=0.3.1
+component_map.docx
+
+# Legacy Streamlit conversation persistence (per-user runtime data)
+chats/
+
+# Claude Code worktrees (local agent state; launch.json is committed)
+.claude/worktrees/
+

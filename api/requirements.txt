@@ -1,0 +1,22 @@
+# Pinned for Python 3.9 compatibility (system Python on dev machine).
+# Bump these freely once we deploy on Vercel where the runtime is 3.11+.
+fastapi>=0.110,<0.116
+uvicorn[standard]>=0.27,<0.33
+python-multipart>=0.0.9
+pyarrow>=14.0,<19
+pandas>=2.0,<2.3
+numpy>=1.24,<2.1
+duckdb>=0.10,<1.2
+matplotlib>=3.7,<3.10
+seaborn>=0.13,<0.14
+chatlas>=0.4,<0.6
+anthropic>=0.30,<0.50
+# chatlas 0.5 uses openai's pydantic→JSON-schema helper for tool registration,
+# even with ChatAnthropic. Required, no API key needed.
+openai>=1.40,<2
+pydantic-settings>=2.4,<2.7
+httpx>=0.27,<0.29
+# Persistence: SQLAlchemy 2.x with SQLite (built-in) by default,
+# Postgres via psycopg2 when DATABASE_URL is set.
+sqlalchemy>=2.0,<2.1
+psycopg2-binary>=2.9,<3.0
