@@ -42,7 +42,8 @@ type Action =
   | { type: "chart"; chart: ChartPart }
   | { type: "snippet"; snippet: SnippetPart }
   | { type: "error"; message: string }
-  | { type: "done"; messageId: string };
+  | { type: "done"; messageId: string }
+  | { type: "set_pinned"; messageId: string; pinned: boolean };
 
 function blankStreaming(tempId: string): StreamingMessage {
   return {
@@ -70,6 +71,7 @@ function reducer(state: State, action: Action): State {
             chatId: "",
             role: "user",
             content: action.content,
+            pinned: true,
             charts: [],
             snippets: [],
             createdAt: new Date().toISOString(),
@@ -105,11 +107,19 @@ function reducer(state: State, action: Action): State {
         chatId: "",
         role: "assistant",
         content: state.streaming.content,
+        pinned: true,
         charts: state.streaming.charts,
         snippets: state.streaming.snippets,
         createdAt: new Date().toISOString(),
       };
       return { messages: [...state.messages, finalized], streaming: null };
+    case "set_pinned":
+      return {
+        ...state,
+        messages: state.messages.map((m) =>
+          m.id === action.messageId ? { ...m, pinned: action.pinned } : m,
+        ),
+      };
   }
 }
 
@@ -220,5 +230,15 @@ export function useChatStream(initialMessages: MessageDTO[] = []) {
     abortRef.current?.abort();
   }, []);
 
-  return { state, send, reset, stop };
+  const setPinned = useCallback(async (messageId: string, pinned: boolean) => {
+    // Optimistic; revert on failure.
+    dispatch({ type: "set_pinned", messageId, pinned });
+    try {
+      await api.setMessagePinned(messageId, pinned);
+    } catch {
+      dispatch({ type: "set_pinned", messageId, pinned: !pinned });
+    }
+  }, []);
+
+  return { state, send, reset, stop, setPinned };
 }

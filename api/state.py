@@ -114,6 +114,7 @@ class MessageRecord:
     charts: list[ChartRecord]
     snippets: list[SnippetRecord]
     created_at: str
+    pinned: bool = True
 
 
 @dataclass
@@ -143,6 +144,7 @@ def _message_to_record(m: db.Message) -> MessageRecord:
         charts=[_chart_to_record(c) for c in m.charts],
         snippets=[_snippet_to_record(sn) for sn in m.snippets],
         created_at=m.created_at.isoformat(),
+        pinned=bool(getattr(m, "pinned", True)),
     )
 
 
@@ -230,6 +232,17 @@ def get_chart(chart_id: str) -> ChartRecord | None:
         return _chart_to_record(c) if c else None
 
 
+def set_message_pinned(message_id: str, pinned: bool) -> bool:
+    """Toggle a message's `pinned` flag. Returns True iff the row existed."""
+    with db.get_session() as s:
+        m = s.get(db.Message, message_id)
+        if not m:
+            return False
+        m.pinned = pinned
+        s.commit()
+        return True
+
+
 # ─── Wire-format helpers ─────────────────────────────────────────────────────
 
 def message_to_dict(m: MessageRecord) -> dict[str, Any]:
@@ -238,6 +251,7 @@ def message_to_dict(m: MessageRecord) -> dict[str, Any]:
         "chatId": m.chat_id,
         "role": m.role,
         "content": m.content,
+        "pinned": m.pinned,
         "charts": [
             {"id": c.id, "url": f"/charts/{c.id}", "title": c.title, "chartType": c.chart_type}
             for c in m.charts

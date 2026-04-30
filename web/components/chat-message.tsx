@@ -1,6 +1,6 @@
 "use client";
 
-import { ChevronDown, Loader2 } from "lucide-react";
+import { ChevronDown, Loader2, Pin, PinOff } from "lucide-react";
 import { useState } from "react";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
@@ -59,23 +59,39 @@ function SnippetBlock({ snippet }: { snippet: SnippetPart }) {
 
 export function ChatMessage({
   message,
+  onPinToggle,
 }: {
   message: MessageDTO | StreamingMessage;
+  onPinToggle?: (messageId: string, pinned: boolean) => void;
 }) {
   const isUser = message.role === "user";
   const isStreaming = "isStreaming" in message && message.isStreaming;
   const toolActive = "toolActive" in message ? message.toolActive : null;
   const error = "error" in message ? message.error : null;
+  const pinned = "pinned" in message ? message.pinned : true;
+  const canPin = !isUser && !isStreaming && "pinned" in message;
 
   return (
-    <div className={`flex ${isUser ? "justify-end" : "justify-start"} my-3`}>
+    <div className={`group flex ${isUser ? "justify-end" : "justify-start"} my-3`}>
       <div
         className={`max-w-[85%] rounded-lg px-4 py-3 ${
           isUser
             ? "bg-primary text-primary-foreground"
-            : "bg-card border"
+            : `bg-card border ${pinned ? "" : "opacity-60"}`
         }`}
       >
+        {canPin && onPinToggle ? (
+          <div className="float-right -mt-1 -mr-1 ml-2">
+            <button
+              onClick={() => onPinToggle(message.id, !pinned)}
+              className="text-muted-foreground hover:text-primary transition-colors p-1 rounded"
+              aria-label={pinned ? "Exclude from report" : "Include in report"}
+              title={pinned ? "In report — click to exclude" : "Excluded — click to include"}
+            >
+              {pinned ? <Pin className="h-3.5 w-3.5" /> : <PinOff className="h-3.5 w-3.5" />}
+            </button>
+          </div>
+        ) : null}
         {message.content ? (
           isUser ? (
             <div className="whitespace-pre-wrap text-sm leading-relaxed">

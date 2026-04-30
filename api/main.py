@@ -11,7 +11,7 @@ from fastapi import FastAPI  # noqa: E402
 from fastapi.middleware.cors import CORSMiddleware  # noqa: E402
 
 from api.db import init_db  # noqa: E402
-from api.routes import chats, datasets  # noqa: E402
+from api.routes import chats, datasets, messages, reports  # noqa: E402
 
 init_db()
 
@@ -27,6 +27,8 @@ app.add_middleware(
 
 app.include_router(datasets.router)
 app.include_router(chats.router)
+app.include_router(messages.router)
+app.include_router(reports.router)
 
 
 @app.get("/health")

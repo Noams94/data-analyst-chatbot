@@ -32,9 +32,27 @@ export interface MessageDTO {
   chatId: string;
   role: "user" | "assistant" | "tool";
   content: string;
+  pinned: boolean;
   charts: ChartPart[];
   snippets: SnippetPart[];
   createdAt: string;
+}
+
+export interface ReportSection {
+  id: string;
+  question: string;
+  bodyMd: string;
+  charts: { id: string; title: string; chartType: string; dataUrl: string }[];
+  snippets: SnippetPart[];
+  createdAt: string;
+}
+
+export interface ReportDoc {
+  chatId: string;
+  datasetName: string;
+  datasetMeta: { rowCount: number; columns: string[] };
+  generatedAt: string;
+  sections: ReportSection[];
 }
 
 export interface ChatDTO {
@@ -73,6 +91,21 @@ export const api = {
 
   async getChat(chatId: string): Promise<ChatDTO> {
     const res = await fetch(`${BASE}/chats/${chatId}`);
+    if (!res.ok) throw new Error(await res.text());
+    return res.json();
+  },
+
+  async setMessagePinned(messageId: string, pinned: boolean): Promise<void> {
+    const res = await fetch(`${BASE}/messages/${messageId}`, {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ pinned }),
+    });
+    if (!res.ok) throw new Error(await res.text());
+  },
+
+  async getReport(chatId: string): Promise<ReportDoc> {
+    const res = await fetch(`${BASE}/chats/${chatId}/report`);
     if (!res.ok) throw new Error(await res.text());
     return res.json();
   },

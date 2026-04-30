@@ -14,12 +14,15 @@ from typing import Optional
 
 from sqlalchemy import (
     JSON,
+    Boolean,
     DateTime,
     ForeignKey,
     Integer,
     String,
     Text,
     create_engine,
+    inspect as sqla_inspect,
+    text,
 )
 from sqlalchemy.orm import (
     DeclarativeBase,
@@ -85,6 +88,7 @@ class Message(Base):
     chat_id: Mapped[str] = mapped_column(String(36), ForeignKey("chats.id", ondelete="CASCADE"))
     role: Mapped[str] = mapped_column(String(16))  # user|assistant|tool
     content: Mapped[str] = mapped_column(Text, default="")
+    pinned: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_now_utc)
 
     chat: Mapped["Chat"] = relationship(back_populates="messages")
@@ -136,8 +140,22 @@ SessionLocal = sessionmaker(bind=engine, expire_on_commit=False, future=True)
 
 
 def init_db() -> None:
-    """Create any missing tables. Idempotent and safe to call on startup."""
+    """Create any missing tables and run any tiny in-place migrations.
+
+    Idempotent and safe to call on startup. Real schema migrations should
+    move to Alembic once the project has more than one deployed instance.
+    """
     Base.metadata.create_all(engine)
+
+    # Tiny ad-hoc migration: the `pinned` column was added after initial
+    # rollout. If an existing DB doesn't have it yet, add it.
+    insp = sqla_inspect(engine)
+    cols = {c["name"] for c in insp.get_columns("messages")}
+    if "pinned" not in cols:
+        with engine.begin() as conn:
+            conn.execute(text(
+                "ALTER TABLE messages ADD COLUMN pinned BOOLEAN NOT NULL DEFAULT 1"
+            ))
 
 
 def get_session() -> Session:

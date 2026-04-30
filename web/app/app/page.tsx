@@ -1,18 +1,21 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
-import { Database } from "lucide-react";
+import { Database, FileText } from "lucide-react";
 import { UploadDropzone } from "@/components/upload-dropzone";
 import { PromptInput } from "@/components/prompt-input";
 import { ChatMessage } from "@/components/chat-message";
+import { ReportDialog } from "@/components/report-dialog";
 import { Badge } from "@/components/ui/badge";
+import { Button } from "@/components/ui/button";
 import { useChatStream } from "@/lib/use-chat-stream";
 import { api, type DatasetSummary } from "@/lib/api";
 
 export default function AppHome() {
   const [dataset, setDataset] = useState<DatasetSummary | null>(null);
   const [chatId, setChatId] = useState<string | null>(null);
-  const { state, send, stop, reset } = useChatStream();
+  const [reportOpen, setReportOpen] = useState(false);
+  const { state, send, stop, reset, setPinned } = useChatStream();
   const scrollerRef = useRef<HTMLDivElement>(null);
 
   // On first mount, hydrate from ?chatId= so a refreshed page restores its history.
@@ -83,20 +86,39 @@ export default function AppHome() {
             {dataset.rowCount.toLocaleString()} rows · {dataset.columns.length} cols
           </Badge>
         </div>
-        <button
-          className="text-muted-foreground hover:text-foreground whitespace-nowrap shrink-0"
-          onClick={() => {
-            setDataset(null);
-            setChatId(null);
-            reset([]);
-            const url = new URL(window.location.href);
-            url.searchParams.delete("chatId");
-            window.history.replaceState({}, "", url.toString());
-          }}
-        >
-          Change dataset
-        </button>
+        <div className="flex items-center gap-3 shrink-0">
+          {chatId && state.messages.length > 0 ? (
+            <Button
+              size="sm"
+              variant="outline"
+              onClick={() => setReportOpen(true)}
+            >
+              <FileText className="h-4 w-4" /> Generate report
+            </Button>
+          ) : null}
+          <button
+            className="text-muted-foreground hover:text-foreground whitespace-nowrap"
+            onClick={() => {
+              setDataset(null);
+              setChatId(null);
+              reset([]);
+              const url = new URL(window.location.href);
+              url.searchParams.delete("chatId");
+              window.history.replaceState({}, "", url.toString());
+            }}
+          >
+            Change dataset
+          </button>
+        </div>
       </div>
+      {chatId ? (
+        <ReportDialog
+          chatId={chatId}
+          open={reportOpen}
+          onOpenChange={setReportOpen}
+          defaultTitle={`${dataset.name} — Analysis report`}
+        />
+      ) : null}
 
       <div ref={scrollerRef} className="flex-1 overflow-y-auto px-6 py-4">
         <div className="max-w-3xl mx-auto">
@@ -106,7 +128,7 @@ export default function AppHome() {
             </div>
           ) : null}
           {state.messages.map((m) => (
-            <ChatMessage key={m.id} message={m} />
+            <ChatMessage key={m.id} message={m} onPinToggle={setPinned} />
           ))}
           {state.streaming ? <ChatMessage message={state.streaming} /> : null}
         </div>
