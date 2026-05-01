@@ -1,6 +1,7 @@
 # FastAPI service for data-analyst-chatbot.
-# Designed for Fly.io / Render / any Docker host. The image runs uvicorn
-# against `api.main:app` with the package layout intact.
+# Built from the api/ directory as the build context (flyctl deploy from api/).
+# The api/ contents land at /app/api/ inside the image so the package layout
+# `from api.X import Y` works at runtime.
 
 FROM python:3.11-slim
 
@@ -13,18 +14,17 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 WORKDIR /app
 
 # Install Python deps first for better layer caching.
-COPY api/requirements.txt /app/api/requirements.txt
-RUN pip install --no-cache-dir -r /app/api/requirements.txt
+COPY requirements.txt /tmp/requirements.txt
+RUN pip install --no-cache-dir -r /tmp/requirements.txt
 
-# Copy the api/ package; the rest of the repo is not needed in the image.
-COPY api /app/api
+# Copy the api/ package contents into /app/api/ — preserves the package
+# layout so `from api.X import Y` resolves at runtime.
+COPY . /app/api
 
-# Vercel-Blob-style /tmp staging dir for runtime data (parquet snapshots).
-# DATA_DIR can be overridden if the host gives you a persistent volume.
+# Runtime data dir; Fly volume can be mounted here via fly.toml.
 ENV DATA_DIR=/tmp/data
 ENV PYTHONUNBUFFERED=1
 
 EXPOSE 8000
 
-# Listen on all interfaces; the host (Fly/Render) maps it to the public port.
 CMD ["uvicorn", "api.main:app", "--host", "0.0.0.0", "--port", "8000"]
