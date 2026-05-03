@@ -1,0 +1,9 @@
+# Don't ship the local venv, dev DB, or per-user runtime data into the image.
+.venv/
+__pycache__/
+**/__pycache__/
+*.pyc
+data.db
+data.db-journal
+data/
+.env
