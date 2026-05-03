@@ -11,7 +11,7 @@
 
 import { useEffect, useState } from "react";
 import Link from "next/link";
-import { usePathname, useSearchParams } from "next/navigation";
+import { usePathname, useRouter } from "next/navigation";
 import {
   Database,
   MessageSquare,
@@ -19,6 +19,8 @@ import {
   Loader2,
   PanelLeftClose,
   PanelLeftOpen,
+  Settings,
+  Trash2,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { useApi, type ChatSummary, type DatasetSummary } from "@/lib/api";
@@ -37,15 +39,16 @@ function timeAgo(iso: string | null): string {
 export function Sidebar() {
   const api = useApi();
   const pathname = usePathname();
-  const search = useSearchParams();
+  const router = useRouter();
   const [datasets, setDatasets] = useState<DatasetSummary[]>([]);
   const [chats, setChats] = useState<ChatSummary[]>([]);
   const [loading, setLoading] = useState(true);
   const [collapsed, setCollapsed] = useState(false);
+  const [confirmDelete, setConfirmDelete] = useState<string | null>(null);
 
   // Refetch when the route changes — covers "user just created a chat" without
   // wiring a global state store.
-  const cacheKey = `${pathname}?${search?.toString() ?? ""}`;
+  const cacheKey = pathname;
 
   useEffect(() => {
     let cancelled = false;
@@ -65,12 +68,40 @@ export function Sidebar() {
     };
   }, [api, cacheKey]);
 
+  // Update chat title in-place when the streaming assistant emits a `title` event.
+  useEffect(() => {
+    const handler = (e: Event) => {
+      const { chatId, title } = (e as CustomEvent<{ chatId: string; title: string }>).detail;
+      setChats((prev) =>
+        prev.map((c) => (c.id === chatId ? { ...c, title } : c))
+      );
+    };
+    window.addEventListener("chat-title-changed", handler);
+    return () => window.removeEventListener("chat-title-changed", handler);
+  }, []);
+
   const activeChatId = pathname?.startsWith("/app/chat/")
     ? pathname.split("/")[3]
     : null;
   const activeDatasetId = pathname?.startsWith("/app/datasets/")
     ? pathname.split("/")[3]
     : null;
+
+  const handleDeleteDataset = async (id: string) => {
+    if (confirmDelete !== id) { setConfirmDelete(id); return; }
+    setConfirmDelete(null);
+    setDatasets((prev) => prev.filter((d) => d.id !== id));
+    if (activeDatasetId === id) router.push("/app");
+    try { await api.deleteDataset(id); } catch { /* already removed from UI */ }
+  };
+
+  const handleDeleteChat = async (id: string) => {
+    if (confirmDelete !== id) { setConfirmDelete(id); return; }
+    setConfirmDelete(null);
+    setChats((prev) => prev.filter((c) => c.id !== id));
+    if (activeChatId === id) router.push("/app");
+    try { await api.deleteChat(id); } catch { /* already removed from UI */ }
+  };
 
   if (collapsed) {
     return (
@@ -119,11 +150,13 @@ export function Sidebar() {
             <ul>
               {datasets.map((d) => {
                 const active = activeDatasetId === d.id;
+                const confirming = confirmDelete === d.id;
                 return (
-                  <li key={d.id}>
+                  <li key={d.id} className="group/item relative">
                     <Link
                       href={`/app/datasets/${d.id}`}
-                      className={`flex items-center gap-2 px-2 py-1.5 rounded-md transition-colors ${
+                      onClick={() => setConfirmDelete(null)}
+                      className={`flex items-center gap-2 px-2 py-1.5 rounded-md transition-colors pr-7 ${
                         active
                           ? "bg-primary/10 text-foreground"
                           : "text-muted-foreground hover:bg-muted hover:text-foreground"
@@ -135,6 +168,17 @@ export function Sidebar() {
                         {d.rowCount.toLocaleString()}
                       </span>
                     </Link>
+                    <button
+                      onClick={(e) => { e.preventDefault(); void handleDeleteDataset(d.id); }}
+                      className={`absolute right-1 top-1/2 -translate-y-1/2 p-1 rounded transition-colors ${
+                        confirming
+                          ? "text-destructive"
+                          : "text-muted-foreground/0 group-hover/item:text-muted-foreground hover:!text-destructive"
+                      }`}
+                      title={confirming ? "Click again to confirm" : "Delete dataset"}
+                    >
+                      <Trash2 className="h-3 w-3" />
+                    </button>
                   </li>
                 );
               })}
@@ -151,15 +195,17 @@ export function Sidebar() {
             <ul>
               {chats.map((c) => {
                 const active = activeChatId === c.id;
+                const confirming = confirmDelete === c.id;
                 const label =
                   c.title && c.title !== "New chat"
                     ? c.title
                     : c.datasetName || "Chat";
                 return (
-                  <li key={c.id}>
+                  <li key={c.id} className="group/item relative">
                     <Link
                       href={`/app/chat/${c.id}`}
-                      className={`flex items-start gap-2 px-2 py-1.5 rounded-md transition-colors ${
+                      onClick={() => setConfirmDelete(null)}
+                      className={`flex items-start gap-2 px-2 py-1.5 rounded-md transition-colors pr-7 ${
                         active
                           ? "bg-primary/10 text-foreground"
                           : "text-muted-foreground hover:bg-muted hover:text-foreground"
@@ -173,6 +219,17 @@ export function Sidebar() {
                         </p>
                       </div>
                     </Link>
+                    <button
+                      onClick={(e) => { e.preventDefault(); void handleDeleteChat(c.id); }}
+                      className={`absolute right-1 top-1/2 -translate-y-1/2 p-1 rounded transition-colors ${
+                        confirming
+                          ? "text-destructive"
+                          : "text-muted-foreground/0 group-hover/item:text-muted-foreground hover:!text-destructive"
+                      }`}
+                      title={confirming ? "Click again to confirm" : "Delete chat"}
+                    >
+                      <Trash2 className="h-3 w-3" />
+                    </button>
                   </li>
                 );
               })}
@@ -185,6 +242,21 @@ export function Sidebar() {
             No data yet. Upload a CSV to get started.
           </div>
         ) : null}
+      </div>
+
+      {/* Settings link pinned to bottom */}
+      <div className="border-t p-2">
+        <Link
+          href="/app/settings"
+          className={`flex items-center gap-2 px-2 py-1.5 rounded-md text-sm transition-colors ${
+            pathname === "/app/settings"
+              ? "bg-primary/10 text-foreground"
+              : "text-muted-foreground hover:bg-muted hover:text-foreground"
+          }`}
+        >
+          <Settings className="h-4 w-4 shrink-0" />
+          Settings
+        </Link>
       </div>
     </aside>
   );

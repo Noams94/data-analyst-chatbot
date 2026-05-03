@@ -9,10 +9,9 @@
     },
     {
       "name": "api",
-      "runtimeExecutable": "/Users/noamkeshet/Documents/Claude/data_analyst_chatbot/api/.venv/bin/uvicorn",
-      "runtimeArgs": ["api.main:app", "--reload"],
-      "cwd": "/Users/noamkeshet/Documents/Claude/data_analyst_chatbot",
-      "autoPort": true
+      "runtimeExecutable": "/bin/bash",
+      "runtimeArgs": ["/Users/noamkeshet/Documents/Claude/data_analyst_chatbot/api/start.sh"],
+      "port": 8000
     },
     {
       "name": "data-analyst-chatbot",

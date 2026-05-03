@@ -82,6 +82,11 @@ class Chat(Base):
         cascade="all, delete-orphan",
         order_by="Message.created_at",
     )
+    dashboard_charts: Mapped[list["DashboardChart"]] = relationship(
+        back_populates="chat",
+        cascade="all, delete-orphan",
+        order_by="DashboardChart.position",
+    )
 
 
 class Message(Base):
@@ -104,6 +109,11 @@ class Message(Base):
         back_populates="message",
         cascade="all, delete-orphan",
         order_by="Snippet.created_at",
+    )
+    plotly_charts: Mapped[list["PlotlyChart"]] = relationship(
+        back_populates="message",
+        cascade="all, delete-orphan",
+        order_by="PlotlyChart.created_at",
     )
 
 
@@ -138,6 +148,42 @@ class Snippet(Base):
     message: Mapped["Message"] = relationship(back_populates="snippets")
 
 
+class PlotlyChart(Base):
+    __tablename__ = "plotly_charts"
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True)
+    message_id: Mapped[str] = mapped_column(String(36), ForeignKey("messages.id", ondelete="CASCADE"))
+    spec_json: Mapped[str] = mapped_column(Text)
+    title: Mapped[str] = mapped_column(String(512), default="")
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_now_utc)
+
+    message: Mapped["Message"] = relationship(back_populates="plotly_charts")
+
+
+class DashboardChart(Base):
+    __tablename__ = "dashboard_charts"
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True)
+    chat_id: Mapped[str] = mapped_column(
+        String(36), ForeignKey("chats.id", ondelete="CASCADE"), index=True
+    )
+    spec_json: Mapped[str] = mapped_column(Text)
+    title: Mapped[str] = mapped_column(String(512), default="")
+    position: Mapped[int] = mapped_column(Integer, default=0)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_now_utc)
+
+    chat: Mapped["Chat"] = relationship(back_populates="dashboard_charts")
+
+
+class UserSettings(Base):
+    """Per-user provider/model configuration (overrides env vars)."""
+    __tablename__ = "user_settings"
+
+    user_id: Mapped[str] = mapped_column(String(64), primary_key=True)
+    settings_json: Mapped[str] = mapped_column(Text, default="{}")
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_now_utc)
+
+
 # ─── Engine + session factory ────────────────────────────────────────────────
 
 _engine_kwargs: dict = {"future": True}
@@ -148,7 +194,7 @@ engine = create_engine(DATABASE_URL, **_engine_kwargs)
 SessionLocal = sessionmaker(bind=engine, expire_on_commit=False, future=True)
 
 
-def init_db() -> None:
+def init_db() -> None:  # noqa: C901
     """Create any missing tables and run any tiny in-place migrations.
 
     Idempotent and safe to call on startup. Real schema migrations should
@@ -157,6 +203,10 @@ def init_db() -> None:
     Base.metadata.create_all(engine)
 
     insp = sqla_inspect(engine)
+
+    # Migration: dashboard_charts table (added post-MVP).
+    if "dashboard_charts" not in insp.get_table_names():
+        Base.metadata.tables["dashboard_charts"].create(engine)
 
     # Migration: messages.pinned (added after initial rollout).
     msg_cols = {c["name"] for c in insp.get_columns("messages")}

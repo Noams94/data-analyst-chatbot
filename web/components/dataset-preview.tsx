@@ -8,7 +8,7 @@
  */
 
 import { useMemo, useState } from "react";
-import { ChevronDown, ChevronRight } from "lucide-react";
+import { ChevronDown, ChevronRight, Search } from "lucide-react";
 import type { ColumnInfo, DatasetPreview } from "@/lib/api";
 
 const NUMERIC_STAT_LABELS: Array<[string, string]> = [
@@ -59,16 +59,37 @@ function Section({
 }
 
 export function DatasetPreviewView({ preview }: { preview: DatasetPreview }) {
+  const [colSearch, setColSearch] = useState("");
   const sampleColumns = useMemo(
     () => preview.columns.map((c) => c.name),
     [preview.columns],
   );
   const numericCols = Object.keys(preview.numericSummary ?? {});
 
+  const filteredColumns = useMemo(() => {
+    const q = colSearch.trim().toLowerCase();
+    if (!q) return preview.columns;
+    return preview.columns.filter(
+      (c) => c.name.toLowerCase().includes(q) || c.dtype.toLowerCase().includes(q),
+    );
+  }, [preview.columns, colSearch]);
+
   return (
     <div className="space-y-4">
       {/* Schema */}
       <Section title={`Schema · ${preview.columns.length} columns`}>
+        <div className="px-4 py-2 border-b">
+          <div className="relative max-w-xs">
+            <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 h-3.5 w-3.5 text-muted-foreground pointer-events-none" />
+            <input
+              type="text"
+              placeholder="Filter columns…"
+              value={colSearch}
+              onChange={(e) => setColSearch(e.target.value)}
+              className="w-full pl-8 pr-3 py-1.5 text-sm rounded-md border bg-background focus:outline-none focus:ring-1 focus:ring-ring"
+            />
+          </div>
+        </div>
         <div className="overflow-x-auto">
           <table className="w-full text-sm">
             <thead className="bg-muted/30 text-xs text-muted-foreground uppercase tracking-wide">
@@ -81,21 +102,29 @@ export function DatasetPreviewView({ preview }: { preview: DatasetPreview }) {
               </tr>
             </thead>
             <tbody>
-              {preview.columns.map((c: ColumnInfo) => (
-                <tr key={c.name} className="border-t">
-                  <td className="px-4 py-1.5 font-medium">{c.name}</td>
-                  <td className="px-4 py-1.5 text-muted-foreground">{c.dtype}</td>
-                  <td className="px-4 py-1.5 text-right tabular-nums text-muted-foreground">
-                    {c.nullPct.toFixed(1)}%
-                  </td>
-                  <td className="px-4 py-1.5 text-right tabular-nums">
-                    {c.uniqueCount.toLocaleString()}
-                  </td>
-                  <td className="px-4 py-1.5 text-muted-foreground truncate max-w-[280px]">
-                    {c.sampleValues.join(", ")}
+              {filteredColumns.length === 0 ? (
+                <tr>
+                  <td colSpan={5} className="px-4 py-4 text-center text-muted-foreground text-xs">
+                    No columns match &ldquo;{colSearch}&rdquo;
                   </td>
                 </tr>
-              ))}
+              ) : (
+                filteredColumns.map((c: ColumnInfo) => (
+                  <tr key={c.name} className="border-t">
+                    <td className="px-4 py-1.5 font-medium">{c.name}</td>
+                    <td className="px-4 py-1.5 text-muted-foreground">{c.dtype}</td>
+                    <td className="px-4 py-1.5 text-right tabular-nums text-muted-foreground">
+                      {c.nullPct.toFixed(1)}%
+                    </td>
+                    <td className="px-4 py-1.5 text-right tabular-nums">
+                      {c.uniqueCount.toLocaleString()}
+                    </td>
+                    <td className="px-4 py-1.5 text-muted-foreground truncate max-w-[280px]">
+                      {c.sampleValues.join(", ")}
+                    </td>
+                  </tr>
+                ))
+              )}
             </tbody>
           </table>
         </div>

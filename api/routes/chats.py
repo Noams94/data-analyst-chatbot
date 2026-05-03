@@ -5,7 +5,7 @@ from __future__ import annotations
 import asyncio
 import os
 import traceback
-from typing import AsyncIterator
+from typing import AsyncIterator, Optional
 
 from fastapi import APIRouter, Depends, HTTPException
 from fastapi.responses import StreamingResponse
@@ -18,13 +18,6 @@ from api.prompts import SYSTEM_PROMPT_EN
 from api.sse import sse
 
 router = APIRouter(tags=["chats"])
-
-# Provider selection. Set PROVIDER=anthropic|ollama in api/.env.
-# Default: prefer anthropic if a key is present, else ollama.
-PROVIDER = os.getenv("PROVIDER", "anthropic" if os.getenv("ANTHROPIC_API_KEY") else "ollama")
-ANTHROPIC_MODEL = os.getenv("ANTHROPIC_MODEL", "claude-opus-4-5")
-OLLAMA_MODEL = os.getenv("OLLAMA_MODEL", "gpt-oss:20b")
-OLLAMA_URL = os.getenv("OLLAMA_BASE_URL", "http://localhost:11434")
 
 
 def _history_turns(chat_record: state.ChatRecord) -> list:
@@ -40,17 +33,79 @@ def _history_turns(chat_record: state.ChatRecord) -> list:
     return turns
 
 
-def _build_chat(turns: list | None = None):
-    if PROVIDER == "ollama":
+def _generate_suggestions(user_msg: str, assistant_msg: str, columns: list, cfg: dict) -> list:
+    """Return up to 3 short follow-up question strings, or [] on failure."""
+    try:
+        if cfg["provider"] == "anthropic":
+            import anthropic, json as _json
+            api_key = cfg.get("anthropic_api_key") or None
+            client = anthropic.Anthropic(api_key=api_key) if api_key else anthropic.Anthropic()
+            cols_str = ", ".join(str(c) for c in columns[:20])
+            resp = client.messages.create(
+                model="claude-haiku-4-5",
+                max_tokens=160,
+                messages=[{
+                    "role": "user",
+                    "content": (
+                        f"Dataset columns: {cols_str}\n"
+                        f"User asked: {user_msg[:200]}\n"
+                        f"Assistant replied: {assistant_msg[:400]}\n\n"
+                        "Suggest exactly 3 short follow-up questions the analyst might ask next. "
+                        "Each must be under 10 words. "
+                        "Return ONLY a valid JSON array of 3 strings, nothing else."
+                    ),
+                }],
+            )
+            text = resp.content[0].text.strip()
+            start, end = text.index("["), text.rindex("]") + 1
+            items = _json.loads(text[start:end])
+            if isinstance(items, list):
+                return [str(q) for q in items[:3] if q]
+    except Exception:
+        pass
+    return []
+
+
+def _generate_title(user_msg: str, assistant_msg: str, cfg: dict) -> str:
+    """Generate a short chat title from the first exchange. Returns a plain string."""
+    try:
+        if cfg["provider"] == "anthropic":
+            import anthropic
+            api_key = cfg.get("anthropic_api_key") or None
+            client = anthropic.Anthropic(api_key=api_key) if api_key else anthropic.Anthropic()
+            resp = client.messages.create(
+                model="claude-haiku-4-5",
+                max_tokens=20,
+                messages=[{
+                    "role": "user",
+                    "content": (
+                        f"User asked: {user_msg[:300]}\n"
+                        f"Assistant replied: {assistant_msg[:300]}\n\n"
+                        "Write a 3-6 word title for this conversation. "
+                        "Reply with ONLY the title, no punctuation."
+                    ),
+                }],
+            )
+            return resp.content[0].text.strip()[:80]
+    except Exception:
+        pass
+    return user_msg[:50].rstrip() + ("…" if len(user_msg) > 50 else "")
+
+
+def _build_chat(cfg: dict, turns: list | None = None):
+    if cfg["provider"] == "ollama":
         from chatlas import ChatOllama
         return ChatOllama(
-            model=OLLAMA_MODEL,
+            model=cfg["ollama_model"],
             system_prompt=SYSTEM_PROMPT_EN,
-            base_url=OLLAMA_URL,
+            base_url=cfg["ollama_base_url"],
             turns=turns,
         )
     from chatlas import ChatAnthropic
-    return ChatAnthropic(model=ANTHROPIC_MODEL, system_prompt=SYSTEM_PROMPT_EN, turns=turns)
+    kwargs: dict = {"model": cfg["anthropic_model"], "system_prompt": SYSTEM_PROMPT_EN, "turns": turns}
+    if cfg.get("anthropic_api_key"):
+        kwargs["api_key"] = cfg["anthropic_api_key"]
+    return ChatAnthropic(**kwargs)
 
 
 class CreateChatBody(BaseModel):
@@ -59,6 +114,27 @@ class CreateChatBody(BaseModel):
 
 class PostMessageBody(BaseModel):
     content: str
+
+
+@router.get("/chats")
+async def list_chats(
+    dataset_id: Optional[str] = None,
+    user_id: str = Depends(get_current_user_id),
+) -> list[dict]:
+    summaries = state.list_chats(user_id, dataset_id)
+    return [
+        {
+            "id": s.id,
+            "datasetId": s.dataset_id,
+            "datasetName": s.dataset_name,
+            "title": s.title,
+            "messageCount": s.message_count,
+            "lastMessageAt": s.last_message_at,
+            "createdAt": s.created_at,
+            "updatedAt": s.updated_at,
+        }
+        for s in summaries
+    ]
 
 
 @router.post("/chats")
@@ -70,6 +146,12 @@ async def create_chat(
     if not chat:
         raise HTTPException(404, "Dataset not found")
     return {"id": chat.id, "datasetId": chat.dataset_id, "title": chat.title}
+
+
+@router.delete("/chats/{chat_id}", status_code=204, response_model=None)
+async def delete_chat(chat_id: str, user_id: str = Depends(get_current_user_id)) -> None:
+    if not state.delete_chat(chat_id, user_id):
+        raise HTTPException(404, "Chat not found")
 
 
 @router.get("/chats/{chat_id}")
@@ -108,15 +190,23 @@ async def post_message(
 
     dataset = state.get_dataset(chat.dataset_id, user_id)
     session = ChatSession(chat_id=chat_id, df=df, data_name=dataset.name if dataset else "")
+    cfg = state.get_user_settings(user_id)
 
     async def stream() -> AsyncIterator[str]:
         set_session(session)
         try:
-            chat_obj = _build_chat(turns=history)
+            chat_obj = _build_chat(cfg, turns=history)
             chat_obj.register_tool(tools.get_data_overview)
             chat_obj.register_tool(tools.run_analysis)
             chat_obj.register_tool(tools.run_sql)
             chat_obj.register_tool(tools.create_chart)
+            chat_obj.register_tool(tools.create_interactive_chart)
+            chat_obj.register_tool(tools.detect_outliers)
+            chat_obj.register_tool(tools.compute_statistics)
+            chat_obj.register_tool(tools.create_map)
+            chat_obj.register_tool(tools.compute_nps)
+            chat_obj.register_tool(tools.add_to_dashboard)
+            chat_obj.register_tool(tools.clear_dashboard_tool)
             chat_obj.register_tool(tools.suggest_next_analyses)
 
             buffer: list[str] = []
@@ -147,12 +237,31 @@ async def post_message(
                 session.pending_charts.clear()
                 session.pending_chart_configs.clear()
 
+                for plotly_item in session.pending_plotly_charts:
+                    rec = state.append_plotly_chart(assistant_id, plotly_item["spec"], plotly_item["title"])
+                    events.append(sse("plotly_chart", {
+                        "id": rec.id,
+                        "spec": rec.spec_json,
+                        "title": rec.title,
+                    }))
+                session.pending_plotly_charts.clear()
+
                 for snip in session.pending_code_snippets:
                     rec = state.append_snippet(assistant_id, snip.get("type", "analysis"), snip.get("code", ""))
                     events.append(sse("snippet", {
                         "id": rec.id, "type": rec.type, "code": rec.code,
                     }))
                 session.pending_code_snippets.clear()
+
+                if session.pending_dashboard_charts:
+                    baseline = len(state.get_dashboard(session.chat_id))
+                    for i, item in enumerate(session.pending_dashboard_charts):
+                        rec = state.append_dashboard_chart(
+                            session.chat_id, item["spec"], item["title"], baseline + i
+                        )
+                        events.append(sse("dashboard_chart", state.dashboard_chart_to_dict(rec)))
+                    session.pending_dashboard_charts.clear()
+
                 return events
 
             for chunk in chat_obj.stream(body.content):
@@ -166,8 +275,31 @@ async def post_message(
             for ev in drain_pending():
                 yield ev
 
-            state.finalize_assistant_message(assistant_id, "".join(buffer))
+            full_text = "".join(buffer)
+            state.finalize_assistant_message(assistant_id, full_text)
             yield sse("done", {"messageId": assistant_id})
+
+            # Post-stream: title + suggestions (run in parallel via executor).
+            chat_after = state.get_chat(chat_id, user_id)
+            real_msgs = [m for m in (chat_after.messages if chat_after else [])
+                         if m.role in ("user", "assistant") and m.content.strip()]
+            user_msg_text = real_msgs[0].content if real_msgs else body.content
+            ds_columns = list(df.columns.astype(str)) if df is not None else []
+            loop = asyncio.get_event_loop()
+
+            if len(real_msgs) == 2:
+                new_title = await loop.run_in_executor(
+                    None, _generate_title, user_msg_text, full_text, cfg
+                )
+                state.update_chat_title(chat_id, new_title)
+                yield sse("title", {"title": new_title})
+
+            if full_text.strip():
+                suggestions = await loop.run_in_executor(
+                    None, _generate_suggestions, user_msg_text, full_text, ds_columns, cfg
+                )
+                if suggestions:
+                    yield sse("suggestions", {"items": suggestions})
 
         except Exception as e:
             yield sse("error", {"message": f"{type(e).__name__}: {e}"})
@@ -182,6 +314,29 @@ async def post_message(
             "X-Accel-Buffering": "no",
         },
     )
+
+
+@router.get("/chats/{chat_id}/dashboard")
+async def get_dashboard(
+    chat_id: str,
+    user_id: str = Depends(get_current_user_id),
+) -> list[dict]:
+    chat = state.get_chat(chat_id, user_id)
+    if not chat:
+        raise HTTPException(404, "Chat not found")
+    charts = state.get_dashboard(chat_id)
+    return [state.dashboard_chart_to_dict(c) for c in charts]
+
+
+@router.delete("/chats/{chat_id}/dashboard", status_code=204, response_model=None)
+async def delete_dashboard(
+    chat_id: str,
+    user_id: str = Depends(get_current_user_id),
+) -> None:
+    chat = state.get_chat(chat_id, user_id)
+    if not chat:
+        raise HTTPException(404, "Chat not found")
+    state.clear_dashboard(chat_id)
 
 
 # Note: /charts/:id used to serve the PNG. It's been retired in favor of

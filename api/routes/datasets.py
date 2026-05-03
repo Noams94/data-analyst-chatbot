@@ -43,6 +43,11 @@ def _to_response(rec: state.DatasetRecord) -> dict:
     }
 
 
+@router.get("")
+async def list_datasets(user_id: str = Depends(get_current_user_id)) -> list[dict]:
+    return [_to_response(rec) for rec in state.list_datasets(user_id)]
+
+
 @router.post("")
 async def upload_dataset(
     file: UploadFile = File(...),
@@ -77,6 +82,75 @@ async def overview(dataset_id: str, user_id: str = Depends(get_current_user_id))
     df = state.load_dataframe(rec.parquet_path)
     set_session(ChatSession(chat_id="overview", df=df, data_name=rec.name))
     return {"overview": get_data_overview()}
+
+
+@router.get("/{dataset_id}/preview")
+async def preview(dataset_id: str, user_id: str = Depends(get_current_user_id)) -> dict:
+    """Structured preview: per-column stats + numeric summary + 5 sample rows.
+    Used by the dataset-detail page to render a 'know your data' panel before
+    the user starts chatting.
+    """
+    import math
+    import pandas as pd
+
+    rec = state.get_dataset(dataset_id, user_id)
+    if not rec:
+        raise HTTPException(404, "Dataset not found")
+    df = state.load_dataframe(rec.parquet_path)
+    n = max(int(df.shape[0]), 1)
+
+    columns = []
+    for col in df.columns:
+        s = df[col]
+        nulls = int(s.isna().sum())
+        unique = int(s.nunique(dropna=True))
+        sample_values = (
+            s.dropna().head(3).astype(str).tolist()
+        )
+        columns.append({
+            "name": str(col),
+            "dtype": str(s.dtype),
+            "nullCount": nulls,
+            "nullPct": round(nulls / n * 100, 1),
+            "uniqueCount": unique,
+            "sampleValues": sample_values,
+        })
+
+    # Numeric summary — describe(), but JSON-friendly.
+    num_cols = df.select_dtypes(include="number").columns
+    numeric_summary: dict[str, dict[str, float]] = {}
+    if len(num_cols):
+        desc = df[num_cols].describe().round(4)
+        for col in num_cols:
+            stats = {}
+            for stat in ("mean", "std", "min", "25%", "50%", "75%", "max"):
+                val = desc.loc[stat, col]
+                # Replace NaN/inf with None so it's JSON-encodable.
+                if pd.isna(val) or (isinstance(val, float) and math.isinf(val)):
+                    stats[stat] = None
+                else:
+                    stats[stat] = float(val)
+            numeric_summary[str(col)] = stats
+
+    # Sample rows — JSON-safe.
+    head = df.head(5).where(pd.notna(df.head(5)), None)
+    sample_rows = head.to_dict(orient="records")
+
+    return {
+        "id": rec.id,
+        "name": rec.name,
+        "rowCount": rec.row_count,
+        "createdAt": rec.created_at,
+        "columns": columns,
+        "numericSummary": numeric_summary,
+        "sampleRows": sample_rows,
+    }
+
+
+@router.delete("/{dataset_id}", status_code=204, response_model=None)
+async def delete_dataset(dataset_id: str, user_id: str = Depends(get_current_user_id)) -> None:
+    if not state.delete_dataset(dataset_id, user_id):
+        raise HTTPException(404, "Dataset not found")
 
 
 @router.get("/{dataset_id}")

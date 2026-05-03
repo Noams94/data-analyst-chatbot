@@ -15,6 +15,7 @@ import { Input } from "@/components/ui/input";
 import { toast } from "sonner";
 import { useApi, type ReportDoc } from "@/lib/api";
 import { downloadHRB } from "@/lib/hrb-export";
+import { downloadDocx } from "@/lib/docx-export";
 import { ReportView, REPORT_STYLES, reportToStandaloneHTML } from "./report-view";
 
 export function ReportDialog({
@@ -79,11 +80,55 @@ export function ReportDialog({
     toast.success("Report downloaded");
   }
 
+  function downloadMarkdown() {
+    if (!report) return;
+    const lines: string[] = [];
+    lines.push(`# ${title}`);
+    if (subtitle) lines.push(`\n_${subtitle}_`);
+    if (author) lines.push(`\n**Author:** ${author}`);
+    lines.push(`\n**Dataset:** ${report.datasetName} · ${report.datasetMeta.rowCount.toLocaleString()} rows · ${report.datasetMeta.columns.length} columns`);
+    lines.push(`\n**Generated:** ${new Date(report.generatedAt).toLocaleDateString(undefined, { year: "numeric", month: "long", day: "numeric" })}`);
+    lines.push("\n---");
+    if (report.sections.length === 0) {
+      lines.push("\n_No findings pinned._");
+    } else {
+      report.sections.forEach((s, i) => {
+        lines.push(`\n## ${i + 1}. ${s.question || "Finding"}`);
+        lines.push(`\n${s.bodyMd}`);
+        if (s.snippets.length > 0) {
+          lines.push("\n<details>\n<summary>Code</summary>\n");
+          s.snippets.forEach((sn) => {
+            const lang = sn.type === "sql" ? "sql" : "python";
+            lines.push(`\`\`\`${lang}\n${sn.code}\n\`\`\``);
+          });
+          lines.push("</details>");
+        }
+      });
+    }
+    const md = lines.join("\n");
+    const blob = new Blob([md], { type: "text/markdown;charset=utf-8" });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = `${title.replace(/[^\w\-]+/g, "_").slice(0, 80) || "report"}.md`;
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    URL.revokeObjectURL(url);
+    toast.success("Markdown downloaded");
+  }
+
   function copyJSON() {
     if (!report) return;
     const payload = { title, subtitle, author, ...report };
     navigator.clipboard.writeText(JSON.stringify(payload, null, 2));
     toast.success("ReportDoc JSON copied to clipboard");
+  }
+
+  async function downloadWord() {
+    if (!report) return;
+    await downloadDocx(report, { title, subtitle, author });
+    toast.success("Word document downloaded");
   }
 
   function downloadForReportBuilder() {
@@ -144,8 +189,14 @@ export function ReportDialog({
           <Button variant="outline" onClick={copyJSON} disabled={!report}>
             <FileText className="h-4 w-4" /> Copy JSON
           </Button>
+          <Button variant="outline" onClick={downloadMarkdown} disabled={!report}>
+            <Download className="h-4 w-4" /> Download Markdown
+          </Button>
           <Button variant="outline" onClick={downloadHTML} disabled={!report}>
             <Download className="h-4 w-4" /> Download HTML
+          </Button>
+          <Button variant="outline" onClick={downloadWord} disabled={!report}>
+            <Download className="h-4 w-4" /> Download Word
           </Button>
           <Button onClick={downloadForReportBuilder} disabled={!report}>
             <Send className="h-4 w-4" /> Export for Report Builder

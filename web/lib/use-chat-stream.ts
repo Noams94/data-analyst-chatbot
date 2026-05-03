@@ -14,7 +14,7 @@
  */
 
 import { useCallback, useReducer, useRef } from "react";
-import { useApi, type ChartPart, type MessageDTO, type SnippetPart } from "./api";
+import { useApi, type ChartPart, type DashboardChartPart, type MessageDTO, type PlotlyChartPart, type SnippetPart } from "./api";
 
 export type StreamingMessage = {
   id: string;          // local placeholder until `done` brings the server id
@@ -22,6 +22,7 @@ export type StreamingMessage = {
   content: string;
   charts: ChartPart[];
   snippets: SnippetPart[];
+  plotlyCharts: PlotlyChartPart[];
   toolActive: string | null;
   isStreaming: boolean;
   error: string | null;
@@ -30,6 +31,7 @@ export type StreamingMessage = {
 type State = {
   messages: MessageDTO[];                  // fully persisted turns from the server
   streaming: StreamingMessage | null;      // the in-flight assistant message
+  suggestions: string[];                   // follow-up question chips
 };
 
 type Action =
@@ -40,10 +42,13 @@ type Action =
   | { type: "tool_start"; name: string }
   | { type: "tool_end" }
   | { type: "chart"; chart: ChartPart }
+  | { type: "plotly_chart"; chart: PlotlyChartPart }
   | { type: "snippet"; snippet: SnippetPart }
   | { type: "error"; message: string }
   | { type: "done"; messageId: string }
-  | { type: "set_pinned"; messageId: string; pinned: boolean };
+  | { type: "set_pinned"; messageId: string; pinned: boolean }
+  | { type: "suggestions"; items: string[] }
+  | { type: "dashboard_chart"; chart: DashboardChartPart };
 
 function blankStreaming(tempId: string): StreamingMessage {
   return {
@@ -52,6 +57,7 @@ function blankStreaming(tempId: string): StreamingMessage {
     content: "",
     charts: [],
     snippets: [],
+    plotlyCharts: [],
     toolActive: null,
     isStreaming: true,
     error: null,
@@ -61,7 +67,7 @@ function blankStreaming(tempId: string): StreamingMessage {
 function reducer(state: State, action: Action): State {
   switch (action.type) {
     case "reset":
-      return { messages: action.messages, streaming: null };
+      return { messages: action.messages, streaming: null, suggestions: [] };
     case "user_sent":
       return {
         messages: [
@@ -74,10 +80,12 @@ function reducer(state: State, action: Action): State {
             pinned: true,
             charts: [],
             snippets: [],
+            plotlyCharts: [],
             createdAt: new Date().toISOString(),
           },
         ],
         streaming: null,
+        suggestions: [],
       };
     case "stream_start":
       return { ...state, streaming: blankStreaming(action.tempId) };
@@ -93,6 +101,9 @@ function reducer(state: State, action: Action): State {
     case "chart":
       if (!state.streaming) return state;
       return { ...state, streaming: { ...state.streaming, charts: [...state.streaming.charts, action.chart] } };
+    case "plotly_chart":
+      if (!state.streaming) return state;
+      return { ...state, streaming: { ...state.streaming, plotlyCharts: [...state.streaming.plotlyCharts, action.chart] } };
     case "snippet":
       if (!state.streaming) return state;
       return { ...state, streaming: { ...state.streaming, snippets: [...state.streaming.snippets, action.snippet] } };
@@ -110,9 +121,10 @@ function reducer(state: State, action: Action): State {
         pinned: true,
         charts: state.streaming.charts,
         snippets: state.streaming.snippets,
+        plotlyCharts: state.streaming.plotlyCharts,
         createdAt: new Date().toISOString(),
       };
-      return { messages: [...state.messages, finalized], streaming: null };
+      return { messages: [...state.messages, finalized], streaming: null, suggestions: state.suggestions };
     case "set_pinned":
       return {
         ...state,
@@ -120,6 +132,13 @@ function reducer(state: State, action: Action): State {
           m.id === action.messageId ? { ...m, pinned: action.pinned } : m,
         ),
       };
+    case "suggestions":
+      return { ...state, suggestions: action.items };
+    case "dashboard_chart":
+      window.dispatchEvent(
+        new CustomEvent("dashboard-chart-added", { detail: action.chart }),
+      );
+      return state;
   }
 }
 
@@ -145,7 +164,7 @@ function parseSseChunk(buffer: string): { events: { event: string; data: string 
 
 export function useChatStream(initialMessages: MessageDTO[] = []) {
   const api = useApi();
-  const [state, dispatch] = useReducer(reducer, { messages: initialMessages, streaming: null });
+  const [state, dispatch] = useReducer(reducer, { messages: initialMessages, streaming: null, suggestions: [] });
   const abortRef = useRef<AbortController | null>(null);
 
   const reset = useCallback((messages: MessageDTO[]) => {
@@ -213,6 +232,9 @@ export function useChatStream(initialMessages: MessageDTO[] = []) {
             case "chart":
               dispatch({ type: "chart", chart: data as unknown as ChartPart });
               break;
+            case "plotly_chart":
+              dispatch({ type: "plotly_chart", chart: data as unknown as PlotlyChartPart });
+              break;
             case "snippet":
               dispatch({ type: "snippet", snippet: data as unknown as SnippetPart });
               break;
@@ -221,6 +243,21 @@ export function useChatStream(initialMessages: MessageDTO[] = []) {
               break;
             case "done":
               dispatch({ type: "done", messageId: String(data.messageId ?? tempStreamId) });
+              break;
+            case "title":
+              if (chatId && typeof data.title === "string") {
+                window.dispatchEvent(new CustomEvent("chat-title-changed", {
+                  detail: { chatId, title: data.title },
+                }));
+              }
+              break;
+            case "suggestions":
+              if (Array.isArray(data.items)) {
+                dispatch({ type: "suggestions", items: data.items as string[] });
+              }
+              break;
+            case "dashboard_chart":
+              dispatch({ type: "dashboard_chart", chart: data as unknown as DashboardChartPart });
               break;
           }
         }

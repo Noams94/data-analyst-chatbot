@@ -21,6 +21,36 @@ export interface DatasetSummary {
   createdAt: string;
 }
 
+export interface ChatSummary {
+  id: string;
+  datasetId: string;
+  datasetName: string;
+  title: string;
+  messageCount: number;
+  lastMessageAt: string | null;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface ColumnInfo {
+  name: string;
+  dtype: string;
+  nullCount: number;
+  nullPct: number;
+  uniqueCount: number;
+  sampleValues: string[];
+}
+
+export interface DatasetPreview {
+  id: string;
+  name: string;
+  rowCount: number;
+  createdAt: string;
+  columns: ColumnInfo[];
+  numericSummary: Record<string, Record<string, number | null>>;
+  sampleRows: Record<string, unknown>[];
+}
+
 export interface ChartPart {
   id: string;
   /** `data:image/png;base64,...` — usable directly in <img src>. */
@@ -35,6 +65,20 @@ export interface SnippetPart {
   code: string;
 }
 
+export interface PlotlyChartPart {
+  id: string;
+  spec: string;
+  title: string;
+}
+
+export interface DashboardChartPart {
+  id: string;
+  chatId: string;
+  spec: string;
+  title: string;
+  position: number;
+}
+
 export interface MessageDTO {
   id: string;
   chatId: string;
@@ -43,6 +87,7 @@ export interface MessageDTO {
   pinned: boolean;
   charts: ChartPart[];
   snippets: SnippetPart[];
+  plotlyCharts: PlotlyChartPart[];
   createdAt: string;
 }
 
@@ -51,6 +96,15 @@ export interface ChatDTO {
   datasetId: string;
   title: string;
   messages: MessageDTO[];
+}
+
+export interface UserSettings {
+  provider: "anthropic" | "ollama";
+  anthropicModel: string;
+  anthropicApiKey: string;   // masked display value
+  hasAnthropicKey: boolean;
+  ollamaModel: string;
+  ollamaBaseUrl: string;
 }
 
 export interface ReportSection {
@@ -101,6 +155,37 @@ export function makeApi(getToken: GetToken) {
       return res.json();
     },
 
+    async deleteDataset(datasetId: string): Promise<void> {
+      const res = await authedFetch(getToken, `${BASE}/datasets/${datasetId}`, { method: "DELETE" });
+      if (!res.ok) throw new Error(await res.text());
+    },
+
+    async deleteChat(chatId: string): Promise<void> {
+      const res = await authedFetch(getToken, `${BASE}/chats/${chatId}`, { method: "DELETE" });
+      if (!res.ok) throw new Error(await res.text());
+    },
+
+    async listDatasets(): Promise<DatasetSummary[]> {
+      const res = await authedFetch(getToken, `${BASE}/datasets`);
+      if (!res.ok) throw new Error(await res.text());
+      return res.json();
+    },
+
+    async getDatasetPreview(datasetId: string): Promise<DatasetPreview> {
+      const res = await authedFetch(getToken, `${BASE}/datasets/${datasetId}/preview`);
+      if (!res.ok) throw new Error(await res.text());
+      return res.json();
+    },
+
+    async listChats(datasetId?: string): Promise<ChatSummary[]> {
+      const url = datasetId
+        ? `${BASE}/chats?dataset_id=${encodeURIComponent(datasetId)}`
+        : `${BASE}/chats`;
+      const res = await authedFetch(getToken, url);
+      if (!res.ok) throw new Error(await res.text());
+      return res.json();
+    },
+
     async createChat(datasetId: string): Promise<{ id: string; datasetId: string; title: string }> {
       const res = await authedFetch(getToken, `${BASE}/chats`, {
         method: "POST",
@@ -126,10 +211,45 @@ export function makeApi(getToken: GetToken) {
       if (!res.ok) throw new Error(await res.text());
     },
 
+    async getSettings(): Promise<UserSettings> {
+      const res = await authedFetch(getToken, `${BASE}/settings`);
+      if (!res.ok) throw new Error(await res.text());
+      return res.json();
+    },
+
+    async patchSettings(updates: Partial<{
+      provider: string;
+      anthropicModel: string;
+      anthropicApiKey: string;
+      ollamaModel: string;
+      ollamaBaseUrl: string;
+    }>): Promise<UserSettings> {
+      const res = await authedFetch(getToken, `${BASE}/settings`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(updates),
+      });
+      if (!res.ok) throw new Error(await res.text());
+      return res.json();
+    },
+
     async getReport(chatId: string): Promise<ReportDoc> {
       const res = await authedFetch(getToken, `${BASE}/chats/${chatId}/report`);
       if (!res.ok) throw new Error(await res.text());
       return res.json();
+    },
+
+    async getDashboard(chatId: string): Promise<DashboardChartPart[]> {
+      const res = await authedFetch(getToken, `${BASE}/chats/${chatId}/dashboard`);
+      if (!res.ok) throw new Error(await res.text());
+      return res.json();
+    },
+
+    async clearDashboard(chatId: string): Promise<void> {
+      const res = await authedFetch(getToken, `${BASE}/chats/${chatId}/dashboard`, {
+        method: "DELETE",
+      });
+      if (!res.ok) throw new Error(await res.text());
     },
 
     /**

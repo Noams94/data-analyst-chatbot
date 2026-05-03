@@ -22,6 +22,8 @@ class ChatSession:
     pending_charts: list[Path] = field(default_factory=list)
     pending_chart_configs: list[dict] = field(default_factory=list)
     pending_code_snippets: list[dict] = field(default_factory=list)
+    pending_plotly_charts: list[dict] = field(default_factory=list)  # {"spec": str, "title": str}
+    pending_dashboard_charts: list[dict] = field(default_factory=list)  # {"spec": str, "title": str, "position": int}
 
 
 _session: ContextVar[Optional[ChatSession]] = ContextVar("session", default=None)

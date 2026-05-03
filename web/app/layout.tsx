@@ -2,6 +2,7 @@ import type { Metadata } from "next";
 import { Heebo, Geist_Mono } from "next/font/google";
 import { ClerkProvider } from "@clerk/nextjs";
 import "./globals.css";
+import "highlight.js/styles/github.css";
 import { Toaster } from "@/components/ui/sonner";
 
 const heebo = Heebo({
@@ -32,7 +33,7 @@ export default function RootLayout({
         lang="en"
         className={`${heebo.variable} ${geistMono.variable} h-full antialiased`}
       >
-        <body className="min-h-full flex flex-col">
+        <body className="min-h-full flex flex-col" suppressHydrationWarning>
           {children}
           <Toaster richColors />
         </body>
