@@ -26,3 +26,13 @@ async def patch_message(
     if not state.set_message_pinned(message_id, user_id, body.pinned):
         raise HTTPException(404, "Message not found")
     return {"id": message_id, "pinned": body.pinned}
+
+
+@router.delete("/{message_id}")
+async def delete_message(
+    message_id: str,
+    user_id: str = Depends(get_current_user_id),
+) -> dict:
+    if not state.delete_message(message_id, user_id):
+        raise HTTPException(404, "Message not found")
+    return {"id": message_id, "deleted": True}

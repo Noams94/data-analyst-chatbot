@@ -8,6 +8,7 @@ first run via metadata.create_all() — no Alembic needed for the MVP.
 from __future__ import annotations
 
 import os
+import sys
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Optional
@@ -35,7 +36,26 @@ from sqlalchemy.orm import (
 )
 
 API_DIR = Path(__file__).parent
-DEFAULT_DB_URL = f"sqlite:///{API_DIR / 'data.db'}"
+
+# Default DB lives outside ~/Documents to avoid iCloud-sync corruption of
+# long-running SQLite connections (macOS evicts/syncs files under us, which
+# leaves open file descriptors in a permanent "disk I/O error" state).
+def _default_db_path() -> Path:
+    if sys.platform == "darwin":
+        base = Path.home() / "Library" / "Application Support" / "data_analyst_chatbot"
+    else:
+        base = API_DIR
+    base.mkdir(parents=True, exist_ok=True)
+    target = base / "data.db"
+    # One-time migration from the old in-repo location.
+    legacy = API_DIR / "data.db"
+    if legacy.exists() and not target.exists():
+        import shutil
+        shutil.copy2(legacy, target)
+    return target
+
+
+DEFAULT_DB_URL = f"sqlite:///{_default_db_path()}"
 DATABASE_URL = os.getenv("DATABASE_URL", DEFAULT_DB_URL)
 
 # Files live on disk; the DB only holds paths.
@@ -170,9 +190,74 @@ class DashboardChart(Base):
     spec_json: Mapped[str] = mapped_column(Text)
     title: Mapped[str] = mapped_column(String(512), default="")
     position: Mapped[int] = mapped_column(Integer, default=0)
+    # 12-col grid layout. width: 1..12 cols, height: 1..6 row units (~120px each).
+    layout_w: Mapped[int] = mapped_column(Integer, default=6)
+    layout_h: Mapped[int] = mapped_column(Integer, default=2)
+    chart_kind: Mapped[str] = mapped_column(String(32), default="plotly")  # plotly|kpi
+    kpi_json: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    # Set when the chart was promoted from a finding — lets us remove it again
+    # when the finding's "in dashboard" flag is turned off.
+    finding_id: Mapped[Optional[str]] = mapped_column(
+        String(36), ForeignKey("findings.id", ondelete="SET NULL"), nullable=True
+    )
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_now_utc)
 
     chat: Mapped["Chat"] = relationship(back_populates="dashboard_charts")
+
+
+class Finding(Base):
+    """Structured insight recorded by the LLM. Replaces ad-hoc message-pinning
+    as the unit of curation: a finding has a claim, evidence, optional chart,
+    and explicit flags for inclusion in dashboard / report."""
+
+    __tablename__ = "findings"
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True)
+    chat_id: Mapped[str] = mapped_column(
+        String(36), ForeignKey("chats.id", ondelete="CASCADE"), index=True
+    )
+    message_id: Mapped[Optional[str]] = mapped_column(
+        String(36), ForeignKey("messages.id", ondelete="SET NULL"), nullable=True
+    )
+    chart_id: Mapped[Optional[str]] = mapped_column(
+        String(36), ForeignKey("plotly_charts.id", ondelete="SET NULL"), nullable=True
+    )
+    title: Mapped[str] = mapped_column(String(512), default="")
+    claim: Mapped[str] = mapped_column(Text, default="")
+    evidence_json: Mapped[str] = mapped_column(Text, default="{}")
+    confidence: Mapped[str] = mapped_column(String(16), default="medium")  # low|medium|high
+    dimension: Mapped[str] = mapped_column(String(64), default="")  # e.g. "revenue", "retention"
+    position: Mapped[int] = mapped_column(Integer, default=0)
+    included_in_report: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
+    included_in_dashboard: Mapped[bool] = mapped_column(Boolean, default=False, nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_now_utc)
+
+
+class ReportDraft(Base):
+    """Auto-generated narrative draft for a chat's report. One row per chat."""
+
+    __tablename__ = "report_drafts"
+
+    chat_id: Mapped[str] = mapped_column(
+        String(36), ForeignKey("chats.id", ondelete="CASCADE"), primary_key=True
+    )
+    sections_json: Mapped[str] = mapped_column(Text, default="{}")
+    style: Mapped[str] = mapped_column(String(32), default="executive")
+    language: Mapped[str] = mapped_column(String(8), default="en")
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_now_utc)
+
+
+class DashboardShare(Base):
+    """Public read-only token for a chat's dashboard."""
+
+    __tablename__ = "dashboard_shares"
+
+    token: Mapped[str] = mapped_column(String(64), primary_key=True)
+    chat_id: Mapped[str] = mapped_column(
+        String(36), ForeignKey("chats.id", ondelete="CASCADE"), index=True
+    )
+    expires_at: Mapped[Optional[datetime]] = mapped_column(DateTime(timezone=True), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=_now_utc)
 
 
 class UserSettings(Base):
@@ -192,6 +277,18 @@ if DATABASE_URL.startswith("sqlite"):
 
 engine = create_engine(DATABASE_URL, **_engine_kwargs)
 SessionLocal = sessionmaker(bind=engine, expire_on_commit=False, future=True)
+
+# SQLite ships with foreign-key enforcement OFF per connection; without this
+# the ondelete="CASCADE"/"SET NULL" clauses above are silently ignored and
+# deleting a chat leaves orphaned findings/shares behind.
+if DATABASE_URL.startswith("sqlite"):
+    from sqlalchemy import event
+
+    @event.listens_for(engine, "connect")
+    def _enable_sqlite_fks(dbapi_conn, _record):
+        cursor = dbapi_conn.cursor()
+        cursor.execute("PRAGMA foreign_keys=ON")
+        cursor.close()
 
 
 def init_db() -> None:  # noqa: C901
@@ -224,6 +321,24 @@ def init_db() -> None:  # noqa: C901
                 conn.execute(text(
                     f"ALTER TABLE {table_name} ADD COLUMN user_id VARCHAR(64) "
                     f"NOT NULL DEFAULT 'anonymous'"
+                ))
+
+    # Migration: dashboard_charts layout fields (Wave 1).
+    if "dashboard_charts" in insp.get_table_names():
+        dash_cols = {c["name"] for c in insp.get_columns("dashboard_charts")}
+        with engine.begin() as conn:
+            if "layout_w" not in dash_cols:
+                conn.execute(text("ALTER TABLE dashboard_charts ADD COLUMN layout_w INTEGER NOT NULL DEFAULT 6"))
+            if "layout_h" not in dash_cols:
+                conn.execute(text("ALTER TABLE dashboard_charts ADD COLUMN layout_h INTEGER NOT NULL DEFAULT 2"))
+            if "chart_kind" not in dash_cols:
+                conn.execute(text("ALTER TABLE dashboard_charts ADD COLUMN chart_kind VARCHAR(32) NOT NULL DEFAULT 'plotly'"))
+            if "kpi_json" not in dash_cols:
+                conn.execute(text("ALTER TABLE dashboard_charts ADD COLUMN kpi_json TEXT"))
+            if "finding_id" not in dash_cols:
+                conn.execute(text(
+                    "ALTER TABLE dashboard_charts ADD COLUMN finding_id VARCHAR(36) "
+                    "REFERENCES findings(id) ON DELETE SET NULL"
                 ))
 
     # Migration: charts.image_bytes — when the column was added we may have

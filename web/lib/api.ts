@@ -77,6 +77,28 @@ export interface DashboardChartPart {
   spec: string;
   title: string;
   position: number;
+  layoutW?: number;
+  layoutH?: number;
+  chartKind?: "plotly" | "kpi";
+  kpi?: { label: string; value: string | number; delta?: string | number; sparkline?: number[] } | null;
+  /** Set when the chart was promoted from a finding. */
+  findingId?: string | null;
+}
+
+export interface FindingPart {
+  id: string;
+  chatId: string;
+  messageId: string | null;
+  chartId: string | null;
+  title: string;
+  claim: string;
+  evidence: { text?: string } & Record<string, unknown>;
+  confidence: "low" | "medium" | "high";
+  dimension: string;
+  position: number;
+  includedInReport: boolean;
+  includedInDashboard: boolean;
+  createdAt: string;
 }
 
 export interface MessageDTO {
@@ -211,6 +233,11 @@ export function makeApi(getToken: GetToken) {
       if (!res.ok) throw new Error(await res.text());
     },
 
+    async deleteMessage(messageId: string): Promise<void> {
+      const res = await authedFetch(getToken, `${BASE}/messages/${messageId}`, { method: "DELETE" });
+      if (!res.ok) throw new Error(await res.text());
+    },
+
     async getSettings(): Promise<UserSettings> {
       const res = await authedFetch(getToken, `${BASE}/settings`);
       if (!res.ok) throw new Error(await res.text());
@@ -250,6 +277,89 @@ export function makeApi(getToken: GetToken) {
         method: "DELETE",
       });
       if (!res.ok) throw new Error(await res.text());
+    },
+
+    async patchDashboardChart(
+      chatId: string,
+      chartId: string,
+      updates: Partial<{ title: string; layoutW: number; layoutH: number; position: number }>,
+    ): Promise<DashboardChartPart> {
+      const res = await authedFetch(getToken, `${BASE}/chats/${chatId}/dashboard/${chartId}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(updates),
+      });
+      if (!res.ok) throw new Error(await res.text());
+      return res.json();
+    },
+
+    async deleteDashboardChart(chatId: string, chartId: string): Promise<void> {
+      const res = await authedFetch(getToken, `${BASE}/chats/${chatId}/dashboard/${chartId}`, {
+        method: "DELETE",
+      });
+      if (!res.ok) throw new Error(await res.text());
+    },
+
+    async reorderDashboard(chatId: string, orderedIds: string[]): Promise<void> {
+      const res = await authedFetch(getToken, `${BASE}/chats/${chatId}/dashboard/reorder`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ orderedIds }),
+      });
+      if (!res.ok) throw new Error(await res.text());
+    },
+
+    async listFindings(chatId: string): Promise<FindingPart[]> {
+      const res = await authedFetch(getToken, `${BASE}/chats/${chatId}/findings`);
+      if (!res.ok) throw new Error(await res.text());
+      return res.json();
+    },
+
+    async patchFinding(
+      findingId: string,
+      updates: Partial<{
+        title: string;
+        claim: string;
+        confidence: "low" | "medium" | "high";
+        dimension: string;
+        includedInReport: boolean;
+        includedInDashboard: boolean;
+        position: number;
+      }>,
+    ): Promise<FindingPart> {
+      const res = await authedFetch(getToken, `${BASE}/findings/${findingId}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(updates),
+      });
+      if (!res.ok) throw new Error(await res.text());
+      return res.json();
+    },
+
+    async deleteFinding(findingId: string): Promise<void> {
+      const res = await authedFetch(getToken, `${BASE}/findings/${findingId}`, {
+        method: "DELETE",
+      });
+      if (!res.ok) throw new Error(await res.text());
+    },
+
+    async reorderFindings(chatId: string, orderedIds: string[]): Promise<void> {
+      const res = await authedFetch(getToken, `${BASE}/chats/${chatId}/findings/reorder`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ orderedIds }),
+      });
+      if (!res.ok) throw new Error(await res.text());
+    },
+
+    async promoteFindingToDashboard(chatId: string, findingId: string): Promise<DashboardChartPart> {
+      const res = await authedFetch(
+        getToken,
+        `${BASE}/chats/${chatId}/findings/${findingId}/promote-to-dashboard`,
+        { method: "POST" },
+      );
+      if (!res.ok) throw new Error(await res.text());
+      return res.json();
     },
 
     /**

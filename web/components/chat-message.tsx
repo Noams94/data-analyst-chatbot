@@ -1,6 +1,6 @@
 "use client";
 
-import { Check, ChevronDown, Copy, Download, Loader2, Pin, PinOff } from "lucide-react";
+import { Check, ChevronDown, Copy, Download, Loader2, MoreHorizontal, Pin, PinOff, Share2, Trash2 } from "lucide-react";
 import dynamic from "next/dynamic";
 import type { PlotParams } from "react-plotly.js";
 import { useEffect, useRef, useState } from "react";
@@ -16,11 +16,41 @@ import {
 } from "@/components/ui/collapsible";
 import { Card } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu";
 import type { ChartPart, MessageDTO, PlotlyChartPart, SnippetPart } from "@/lib/api";
 import type { StreamingMessage } from "@/lib/use-chat-stream";
 
 hljs.registerLanguage("python", python);
 hljs.registerLanguage("sql", sql);
+
+async function copyText(text: string): Promise<boolean> {
+  try {
+    if (navigator.clipboard?.writeText && window.isSecureContext) {
+      await navigator.clipboard.writeText(text);
+      return true;
+    }
+  } catch {
+    // fall through
+  }
+  try {
+    const ta = document.createElement("textarea");
+    ta.value = text;
+    ta.style.position = "fixed";
+    ta.style.opacity = "0";
+    document.body.appendChild(ta);
+    ta.select();
+    const ok = document.execCommand("copy");
+    document.body.removeChild(ta);
+    return ok;
+  } catch {
+    return false;
+  }
+}
 
 // Dynamic import so Plotly bundle doesn't run during SSR.
 const Plot = dynamic<PlotParams>(() => import("@/components/plotly-chart"), { ssr: false });
@@ -89,11 +119,11 @@ function PlotlyChartCard({ chart }: { chart: PlotlyChartPart }) {
 
 function CopyButton({ text }: { text: string }) {
   const [copied, setCopied] = useState(false);
-  const handle = () => {
-    navigator.clipboard.writeText(text).then(() => {
+  const handle = async () => {
+    if (await copyText(text)) {
       setCopied(true);
       setTimeout(() => setCopied(false), 1500);
-    });
+    }
   };
   return (
     <button
@@ -142,9 +172,11 @@ function SnippetBlock({ snippet }: { snippet: SnippetPart }) {
 export function ChatMessage({
   message,
   onPinToggle,
+  onDelete,
 }: {
   message: MessageDTO | StreamingMessage;
   onPinToggle?: (messageId: string, pinned: boolean) => void;
+  onDelete?: (messageId: string) => void;
 }) {
   const isUser = message.role === "user";
   const isStreaming = "isStreaming" in message && message.isStreaming;
@@ -152,7 +184,29 @@ export function ChatMessage({
   const error = "error" in message ? message.error : null;
   const pinned = "pinned" in message ? message.pinned : true;
   const canPin = !isUser && !isStreaming && "pinned" in message;
+  const canAct = !isStreaming && !!message.content;
   const plotlyCharts: PlotlyChartPart[] = "plotlyCharts" in message ? (message.plotlyCharts ?? []) : [];
+
+  const handleCopy = () => {
+    void copyText(message.content || "");
+  };
+
+  const handleShare = async () => {
+    const text = message.content || "";
+    if (typeof navigator !== "undefined" && "share" in navigator) {
+      try {
+        await navigator.share({ text });
+        return;
+      } catch {
+        // fall through to clipboard
+      }
+    }
+    void copyText(text);
+  };
+
+  const handleDelete = () => {
+    if (onDelete) onDelete(message.id);
+  };
 
   return (
     <div className={`group flex ${isUser ? "justify-end" : "justify-start"} my-3`}>
@@ -163,16 +217,42 @@ export function ChatMessage({
             : `bg-card border ${pinned ? "" : "opacity-60"}`
         }`}
       >
-        {canPin && onPinToggle ? (
-          <div className="float-right -mt-1 -mr-1 ml-2">
-            <button
-              onClick={() => onPinToggle(message.id, !pinned)}
-              className="text-muted-foreground hover:text-primary transition-colors p-1 rounded"
-              aria-label={pinned ? "Exclude from report" : "Include in report"}
-              title={pinned ? "In report — click to exclude" : "Excluded — click to include"}
-            >
-              {pinned ? <Pin className="h-3.5 w-3.5" /> : <PinOff className="h-3.5 w-3.5" />}
-            </button>
+        {(canPin && onPinToggle) || canAct ? (
+          <div className="float-right -mt-1 -mr-1 ml-2 flex items-center gap-0.5">
+            {canPin && onPinToggle ? (
+              <button
+                onClick={() => onPinToggle(message.id, !pinned)}
+                className={`${isUser ? "text-primary-foreground/70 hover:text-primary-foreground" : "text-muted-foreground hover:text-primary"} transition-colors p-1 rounded`}
+                aria-label={pinned ? "Exclude from report" : "Include in report"}
+                title={pinned ? "In report — click to exclude" : "Excluded — click to include"}
+              >
+                {pinned ? <Pin className="h-3.5 w-3.5" /> : <PinOff className="h-3.5 w-3.5" />}
+              </button>
+            ) : null}
+            {canAct ? (
+              <DropdownMenu>
+                <DropdownMenuTrigger
+                  className={`${isUser ? "text-primary-foreground/70 hover:text-primary-foreground" : "text-muted-foreground hover:text-foreground"} transition-colors p-1 rounded`}
+                  aria-label="Message actions"
+                  title="Actions"
+                >
+                  <MoreHorizontal className="h-3.5 w-3.5" />
+                </DropdownMenuTrigger>
+                <DropdownMenuContent align="end">
+                  <DropdownMenuItem onClick={handleCopy}>
+                    <Copy className="h-3.5 w-3.5" /> Copy
+                  </DropdownMenuItem>
+                  <DropdownMenuItem onClick={handleShare}>
+                    <Share2 className="h-3.5 w-3.5" /> Share
+                  </DropdownMenuItem>
+                  {onDelete ? (
+                    <DropdownMenuItem onClick={handleDelete} variant="destructive">
+                      <Trash2 className="h-3.5 w-3.5" /> Delete
+                    </DropdownMenuItem>
+                  ) : null}
+                </DropdownMenuContent>
+              </DropdownMenu>
+            ) : null}
           </div>
         ) : null}
         {message.content ? (

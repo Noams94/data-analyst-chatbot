@@ -8,6 +8,7 @@ through GET /charts/:id.
 from __future__ import annotations
 
 from dataclasses import dataclass
+from datetime import datetime, timedelta, timezone
 from functools import lru_cache
 from pathlib import Path
 from typing import Any
@@ -240,10 +241,18 @@ def get_chat(chat_id: str, user_id: str) -> ChatRecord | None:
         if not chat or chat.user_id != user_id:
             return None
         # Remove empty assistant placeholders left by interrupted streams.
+        # Skip placeholders younger than 60s — those are in-flight streams whose
+        # creator just called us to fetch history.
+        cutoff = datetime.now(timezone.utc) - timedelta(seconds=60)
+        def _is_old(m_created):
+            if m_created.tzinfo is None:
+                m_created = m_created.replace(tzinfo=timezone.utc)
+            return m_created < cutoff
         stale = [
             m for m in chat.messages
             if m.role == "assistant" and not m.content.strip()
             and not m.charts and not m.snippets
+            and _is_old(m.created_at)
         ]
         for m in stale:
             s.delete(m)
@@ -408,6 +417,19 @@ def set_message_pinned(message_id: str, user_id: str, pinned: bool) -> bool:
         return True
 
 
+def delete_message(message_id: str, user_id: str) -> bool:
+    with db.get_session() as s:
+        m = s.get(db.Message, message_id)
+        if not m:
+            return False
+        chat = s.get(db.Chat, m.chat_id)
+        if not chat or chat.user_id != user_id:
+            return False
+        s.delete(m)
+        s.commit()
+        return True
+
+
 # ─── User settings ───────────────────────────────────────────────────────────
 
 import json as _json
@@ -460,22 +482,48 @@ class DashboardChartRecord:
     spec_json: str
     title: str
     position: int
+    layout_w: int = 6
+    layout_h: int = 2
+    chart_kind: str = "plotly"
+    kpi_json: str | None = None
+    finding_id: str | None = None
 
 
 def append_dashboard_chart(
-    chat_id: str, spec_json: str, title: str, position: int
+    chat_id: str, spec_json: str, title: str, position: int,
+    layout_w: int = 6, layout_h: int = 2,
+    chart_kind: str = "plotly", kpi_json: str | None = None,
+    finding_id: str | None = None,
 ) -> DashboardChartRecord:
     chart_id = new_id()
     with db.get_session() as s:
         row = db.DashboardChart(
             id=chart_id, chat_id=chat_id,
             spec_json=spec_json, title=title, position=position,
+            layout_w=layout_w, layout_h=layout_h,
+            chart_kind=chart_kind, kpi_json=kpi_json,
+            finding_id=finding_id,
         )
         s.add(row)
         s.commit()
     return DashboardChartRecord(
         id=chart_id, chat_id=chat_id,
         spec_json=spec_json, title=title, position=position,
+        layout_w=layout_w, layout_h=layout_h,
+        chart_kind=chart_kind, kpi_json=kpi_json,
+        finding_id=finding_id,
+    )
+
+
+def _dashboard_to_record(r: db.DashboardChart) -> DashboardChartRecord:
+    return DashboardChartRecord(
+        id=r.id, chat_id=r.chat_id,
+        spec_json=r.spec_json, title=r.title, position=r.position,
+        layout_w=getattr(r, "layout_w", 6) or 6,
+        layout_h=getattr(r, "layout_h", 2) or 2,
+        chart_kind=getattr(r, "chart_kind", "plotly") or "plotly",
+        kpi_json=getattr(r, "kpi_json", None),
+        finding_id=getattr(r, "finding_id", None),
     )
 
 
@@ -487,13 +535,83 @@ def get_dashboard(chat_id: str) -> list[DashboardChartRecord]:
             .where(db.DashboardChart.chat_id == chat_id)
             .order_by(db.DashboardChart.position)
         ).scalars().all()
-        return [
-            DashboardChartRecord(
-                id=r.id, chat_id=r.chat_id,
-                spec_json=r.spec_json, title=r.title, position=r.position,
-            )
-            for r in rows
-        ]
+        return [_dashboard_to_record(r) for r in rows]
+
+
+def update_dashboard_chart(
+    chat_id: str, user_id: str, chart_id: str,
+    title: str | None = None,
+    layout_w: int | None = None,
+    layout_h: int | None = None,
+    position: int | None = None,
+) -> DashboardChartRecord | None:
+    with db.get_session() as s:
+        chat = s.get(db.Chat, chat_id)
+        if not chat or chat.user_id != user_id:
+            return None
+        row = s.get(db.DashboardChart, chart_id)
+        if not row or row.chat_id != chat_id:
+            return None
+        if title is not None:
+            row.title = title
+        if layout_w is not None:
+            row.layout_w = max(1, min(12, int(layout_w)))
+        if layout_h is not None:
+            row.layout_h = max(1, min(6, int(layout_h)))
+        if position is not None:
+            row.position = int(position)
+        s.commit()
+        s.refresh(row)
+        return _dashboard_to_record(row)
+
+
+def reorder_dashboard(chat_id: str, user_id: str, ordered_ids: list[str]) -> bool:
+    with db.get_session() as s:
+        chat = s.get(db.Chat, chat_id)
+        if not chat or chat.user_id != user_id:
+            return False
+        for pos, cid in enumerate(ordered_ids):
+            row = s.get(db.DashboardChart, cid)
+            if row and row.chat_id == chat_id:
+                row.position = pos
+        s.commit()
+        return True
+
+
+def delete_dashboard_charts_for_finding(
+    chat_id: str, user_id: str, finding_id: str
+) -> list[str]:
+    """Remove dashboard charts that were promoted from this finding.
+    Returns the deleted chart ids."""
+    from sqlalchemy import select
+    with db.get_session() as s:
+        chat = s.get(db.Chat, chat_id)
+        if not chat or chat.user_id != user_id:
+            return []
+        rows = s.execute(
+            select(db.DashboardChart)
+            .where(db.DashboardChart.chat_id == chat_id)
+            .where(db.DashboardChart.finding_id == finding_id)
+        ).scalars().all()
+        deleted = [r.id for r in rows]
+        for r in rows:
+            s.delete(r)
+        if rows:
+            s.commit()
+        return deleted
+
+
+def delete_dashboard_chart(chat_id: str, user_id: str, chart_id: str) -> bool:
+    with db.get_session() as s:
+        chat = s.get(db.Chat, chat_id)
+        if not chat or chat.user_id != user_id:
+            return False
+        row = s.get(db.DashboardChart, chart_id)
+        if not row or row.chat_id != chat_id:
+            return False
+        s.delete(row)
+        s.commit()
+        return True
 
 
 def clear_dashboard(chat_id: str) -> int:
@@ -513,7 +631,184 @@ def dashboard_chart_to_dict(r: DashboardChartRecord) -> dict:
         "spec": r.spec_json,
         "title": r.title,
         "position": r.position,
+        "layoutW": r.layout_w,
+        "layoutH": r.layout_h,
+        "chartKind": r.chart_kind,
+        "kpi": _json.loads(r.kpi_json) if r.kpi_json else None,
+        "findingId": r.finding_id,
     }
+
+
+# ─── Findings ────────────────────────────────────────────────────────────────
+
+@dataclass
+class FindingRecord:
+    id: str
+    chat_id: str
+    message_id: str | None
+    chart_id: str | None
+    title: str
+    claim: str
+    evidence: dict
+    confidence: str
+    dimension: str
+    position: int
+    included_in_report: bool
+    included_in_dashboard: bool
+    created_at: str
+
+
+def _finding_to_record(f: db.Finding) -> FindingRecord:
+    try:
+        evidence = _json.loads(f.evidence_json) if f.evidence_json else {}
+    except Exception:
+        evidence = {}
+    return FindingRecord(
+        id=f.id, chat_id=f.chat_id, message_id=f.message_id, chart_id=f.chart_id,
+        title=f.title, claim=f.claim, evidence=evidence,
+        confidence=f.confidence, dimension=f.dimension,
+        position=f.position,
+        included_in_report=bool(f.included_in_report),
+        included_in_dashboard=bool(f.included_in_dashboard),
+        created_at=f.created_at.isoformat(),
+    )
+
+
+def append_finding(
+    chat_id: str, message_id: str | None, title: str, claim: str,
+    evidence: dict, confidence: str = "medium", dimension: str = "",
+    chart_id: str | None = None,
+) -> FindingRecord:
+    from sqlalchemy import func, select
+    finding_id = new_id()
+    with db.get_session() as s:
+        next_pos = s.execute(
+            select(func.coalesce(func.max(db.Finding.position), -1) + 1)
+            .where(db.Finding.chat_id == chat_id)
+        ).scalar_one()
+        row = db.Finding(
+            id=finding_id, chat_id=chat_id, message_id=message_id,
+            chart_id=chart_id, title=title[:512], claim=claim,
+            evidence_json=_json.dumps(evidence, default=str),
+            confidence=confidence if confidence in ("low", "medium", "high") else "medium",
+            dimension=dimension[:64], position=int(next_pos),
+        )
+        s.add(row)
+        s.commit()
+        s.refresh(row)
+        return _finding_to_record(row)
+
+
+def list_findings(chat_id: str, user_id: str) -> list[FindingRecord] | None:
+    from sqlalchemy import select
+    with db.get_session() as s:
+        chat = s.get(db.Chat, chat_id)
+        if not chat or chat.user_id != user_id:
+            return None
+        rows = s.execute(
+            select(db.Finding)
+            .where(db.Finding.chat_id == chat_id)
+            .order_by(db.Finding.position, db.Finding.created_at)
+        ).scalars().all()
+        return [_finding_to_record(r) for r in rows]
+
+
+def patch_finding(
+    finding_id: str, user_id: str, *,
+    title: str | None = None, claim: str | None = None,
+    confidence: str | None = None, dimension: str | None = None,
+    included_in_report: bool | None = None,
+    included_in_dashboard: bool | None = None,
+    position: int | None = None,
+) -> FindingRecord | None:
+    with db.get_session() as s:
+        row = s.get(db.Finding, finding_id)
+        if not row:
+            return None
+        chat = s.get(db.Chat, row.chat_id)
+        if not chat or chat.user_id != user_id:
+            return None
+        if title is not None:
+            row.title = title[:512]
+        if claim is not None:
+            row.claim = claim
+        if confidence is not None and confidence in ("low", "medium", "high"):
+            row.confidence = confidence
+        if dimension is not None:
+            row.dimension = dimension[:64]
+        if included_in_report is not None:
+            row.included_in_report = bool(included_in_report)
+        if included_in_dashboard is not None:
+            row.included_in_dashboard = bool(included_in_dashboard)
+        if position is not None:
+            row.position = int(position)
+        s.commit()
+        s.refresh(row)
+        return _finding_to_record(row)
+
+
+def delete_finding(finding_id: str, user_id: str) -> bool:
+    with db.get_session() as s:
+        row = s.get(db.Finding, finding_id)
+        if not row:
+            return False
+        chat = s.get(db.Chat, row.chat_id)
+        if not chat or chat.user_id != user_id:
+            return False
+        s.delete(row)
+        s.commit()
+        return True
+
+
+def reorder_findings(chat_id: str, user_id: str, ordered_ids: list[str]) -> bool:
+    with db.get_session() as s:
+        chat = s.get(db.Chat, chat_id)
+        if not chat or chat.user_id != user_id:
+            return False
+        for pos, fid in enumerate(ordered_ids):
+            row = s.get(db.Finding, fid)
+            if row and row.chat_id == chat_id:
+                row.position = pos
+        s.commit()
+        return True
+
+
+def get_finding(finding_id: str, user_id: str) -> FindingRecord | None:
+    with db.get_session() as s:
+        row = s.get(db.Finding, finding_id)
+        if not row:
+            return None
+        chat = s.get(db.Chat, row.chat_id)
+        if not chat or chat.user_id != user_id:
+            return None
+        return _finding_to_record(row)
+
+
+def finding_to_dict(f: FindingRecord) -> dict:
+    return {
+        "id": f.id,
+        "chatId": f.chat_id,
+        "messageId": f.message_id,
+        "chartId": f.chart_id,
+        "title": f.title,
+        "claim": f.claim,
+        "evidence": f.evidence,
+        "confidence": f.confidence,
+        "dimension": f.dimension,
+        "position": f.position,
+        "includedInReport": f.included_in_report,
+        "includedInDashboard": f.included_in_dashboard,
+        "createdAt": f.created_at,
+    }
+
+
+def get_plotly_chart_spec(chart_id: str) -> tuple[str, str] | None:
+    """Return (spec_json, title) for a plotly chart, or None."""
+    with db.get_session() as s:
+        c = s.get(db.PlotlyChart, chart_id)
+        if not c:
+            return None
+        return (c.spec_json, c.title)
 
 
 # ─── Wire-format helpers ─────────────────────────────────────────────────────

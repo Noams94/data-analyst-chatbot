@@ -20,7 +20,7 @@ import { useApi, type DashboardChartPart } from "@/lib/api";
 // Same SSR-safe dynamic import pattern used in chat-message.tsx
 const Plot = dynamic(() => import("react-plotly.js"), { ssr: false });
 
-function DashboardChartCard({ chart }: { chart: DashboardChartPart }) {
+function DashboardChartCard({ chart, hero }: { chart: DashboardChartPart; hero?: boolean }) {
   let figure: { data?: Plotly.Data[]; layout?: object } = {};
   try {
     figure = JSON.parse(chart.spec);
@@ -29,20 +29,24 @@ function DashboardChartCard({ chart }: { chart: DashboardChartPart }) {
       <p className="text-sm text-destructive p-4">Failed to parse chart spec.</p>
     );
   }
+  const userLayout = (figure.layout ?? {}) as Record<string, unknown>;
+  // Strip any title set in the spec — the card header owns the title to avoid
+  // the modebar overlapping it.
+  const { title: _spec_title, ...layoutWithoutTitle } = userLayout;
   return (
-    <Card className="p-3 overflow-hidden">
+    <Card className="p-4 overflow-hidden gap-2">
       {chart.title ? (
-        <p className="text-sm font-medium mb-2 truncate">{chart.title}</p>
+        <p className="text-sm font-semibold tracking-tight truncate">{chart.title}</p>
       ) : null}
       <Plot
         data={figure.data ?? []}
         layout={{
           autosize: true,
-          margin: { t: 32, r: 16, b: 48, l: 48 },
-          ...figure.layout,
+          margin: { t: 16, r: 16, b: 48, l: 48 },
+          ...layoutWithoutTitle,
         }}
-        config={{ responsive: true, displayModeBar: true, displaylogo: false }}
-        style={{ width: "100%", minHeight: 300 }}
+        config={{ responsive: true, displayModeBar: "hover", displaylogo: false }}
+        style={{ width: "100%", height: hero ? 420 : 320 }}
         useResizeHandler
       />
     </Card>
@@ -104,6 +108,14 @@ export function DashboardDialog({
     if (initialCharts) setCharts(initialCharts);
   }, [initialCharts]);
 
+  // Plotly measures container size on mount; inside a dialog that animates in,
+  // the first measurement is wrong. Nudge it after the dialog has opened.
+  useEffect(() => {
+    if (!open) return;
+    const t = setTimeout(() => window.dispatchEvent(new Event("resize")), 150);
+    return () => clearTimeout(t);
+  }, [open, charts.length]);
+
   async function handleClear() {
     setClearing(true);
     try {
@@ -120,7 +132,7 @@ export function DashboardDialog({
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="max-w-6xl max-h-[90vh] flex flex-col gap-0 p-0">
+      <DialogContent className="sm:max-w-6xl max-h-[90vh] flex flex-col gap-0 p-0">
         <DialogHeader className="px-6 pt-6 pb-4 border-b">
           <DialogTitle className="flex items-center gap-2">
             <LayoutDashboard className="h-4 w-4" />
@@ -143,8 +155,10 @@ export function DashboardDialog({
             <EmptyState />
           ) : (
             <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-              {charts.map((chart) => (
-                <DashboardChartCard key={chart.id} chart={chart} />
+              {charts.map((chart, i) => (
+                <div key={chart.id} className={i === 0 && charts.length > 1 ? "md:col-span-2" : ""}>
+                  <DashboardChartCard chart={chart} hero={i === 0 && charts.length > 1} />
+                </div>
               ))}
             </div>
           )}

@@ -14,10 +14,87 @@ from pydantic import BaseModel
 from api import state, tools
 from api.auth import get_current_user_id
 from api.chat_session import ChatSession, set_session
-from api.prompts import SYSTEM_PROMPT_EN
+from api.prompts import SYSTEM_PROMPT
+from api.recovery import extract_tool_call_jsons, strip_spans
 from api.sse import sse
 
 router = APIRouter(tags=["chats"])
+
+
+# clear_dashboard_tool is deliberately NOT recoverable from text: it's
+# destructive, and text-embedded JSON may originate from quoted dataset
+# content rather than a genuinely misemitted call.
+_TOOL_FUNCS = {
+    "add_to_dashboard": tools.add_to_dashboard,
+    "create_interactive_chart": tools.create_interactive_chart,
+    "record_finding": tools.record_finding,
+}
+
+_RECOVERY_LABELS = {
+    "add_to_dashboard": "Added to dashboard",
+    "create_interactive_chart": "Created chart",
+    "record_finding": "Recorded finding",
+}
+
+
+def _recover_misemitted_tool_calls(text: str) -> str:
+    """Some models occasionally describe a tool call as JSON text instead of
+    invoking it. Find every embedded tool-call JSON, run the real tool, and
+    cut the JSON out of the message while keeping the surrounding prose.
+    """
+    if '"name"' not in text or '"parameters"' not in text:
+        return text
+    matches = extract_tool_call_jsons(text)
+    if not matches:
+        return text
+
+    import inspect
+    executed: list[tuple[str, str]] = []  # (tool name, display title)
+    spans: list[tuple[int, int]] = []
+    for obj, start, end in matches:
+        name = obj.get("name")
+        params = obj.get("parameters")
+        fn = _TOOL_FUNCS.get(name) if isinstance(name, str) else None
+        if not fn or not isinstance(params, dict):
+            continue
+        # Coerce common model misshapes against the function's actual signature.
+        sig = inspect.signature(fn)
+        clean: dict = {}
+        for pname, pval in params.items():
+            if pname not in sig.parameters:
+                continue
+            anno = sig.parameters[pname].annotation
+            if anno is str:
+                if pval is None:
+                    pval = ""
+                elif isinstance(pval, list):
+                    pval = pval[0] if pval else ""
+                else:
+                    pval = str(pval)
+            elif anno is int and pval is None:
+                pval = 0
+            elif anno is bool and isinstance(pval, str):
+                pval = pval.lower() in ("true", "1", "yes")
+            clean[pname] = pval
+        try:
+            result = fn(**clean)
+            # Tools return error strings on failure; only count real successes.
+            if isinstance(result, str) and result.lower().startswith(("error", "failed", "invalid")):
+                continue
+            executed.append((name, str(clean.get("title") or name)))
+            spans.append((start, end))
+        except Exception:
+            continue
+    if not executed:
+        return text
+    cleaned = strip_spans(text, spans)
+    if cleaned:
+        return cleaned
+    # The message was nothing but tool-call JSON — synthesize a confirmation.
+    lines = [f"{_RECOVERY_LABELS.get(n, n)}: {t}" for n, t in executed]
+    if len(lines) == 1:
+        return f"{lines[0]}."
+    return "\n".join(f"- {line}" for line in lines)
 
 
 def _history_turns(chat_record: state.ChatRecord) -> list:
@@ -97,12 +174,12 @@ def _build_chat(cfg: dict, turns: list | None = None):
         from chatlas import ChatOllama
         return ChatOllama(
             model=cfg["ollama_model"],
-            system_prompt=SYSTEM_PROMPT_EN,
+            system_prompt=SYSTEM_PROMPT,
             base_url=cfg["ollama_base_url"],
             turns=turns,
         )
     from chatlas import ChatAnthropic
-    kwargs: dict = {"model": cfg["anthropic_model"], "system_prompt": SYSTEM_PROMPT_EN, "turns": turns}
+    kwargs: dict = {"model": cfg["anthropic_model"], "system_prompt": SYSTEM_PROMPT, "turns": turns}
     if cfg.get("anthropic_api_key"):
         kwargs["api_key"] = cfg["anthropic_api_key"]
     return ChatAnthropic(**kwargs)
@@ -208,8 +285,10 @@ async def post_message(
             chat_obj.register_tool(tools.add_to_dashboard)
             chat_obj.register_tool(tools.clear_dashboard_tool)
             chat_obj.register_tool(tools.suggest_next_analyses)
+            chat_obj.register_tool(tools.record_finding)
 
             buffer: list[str] = []
+            nonlocal_state: dict = {"last_plotly_id": None}
 
             def drain_pending() -> list[str]:
                 events: list[str] = []
@@ -237,14 +316,18 @@ async def post_message(
                 session.pending_charts.clear()
                 session.pending_chart_configs.clear()
 
+                last_plotly_id_local: str | None = None
                 for plotly_item in session.pending_plotly_charts:
                     rec = state.append_plotly_chart(assistant_id, plotly_item["spec"], plotly_item["title"])
+                    last_plotly_id_local = rec.id
                     events.append(sse("plotly_chart", {
                         "id": rec.id,
                         "spec": rec.spec_json,
                         "title": rec.title,
                     }))
                 session.pending_plotly_charts.clear()
+                if last_plotly_id_local:
+                    nonlocal_state["last_plotly_id"] = last_plotly_id_local
 
                 for snip in session.pending_code_snippets:
                     rec = state.append_snippet(assistant_id, snip.get("type", "analysis"), snip.get("code", ""))
@@ -262,6 +345,21 @@ async def post_message(
                         events.append(sse("dashboard_chart", state.dashboard_chart_to_dict(rec)))
                     session.pending_dashboard_charts.clear()
 
+                for f_item in session.pending_findings:
+                    chart_id = nonlocal_state.get("last_plotly_id") if f_item.get("chart_ref") == "last" else None
+                    rec = state.append_finding(
+                        chat_id=session.chat_id,
+                        message_id=assistant_id,
+                        title=f_item["title"],
+                        claim=f_item["claim"],
+                        evidence={"text": f_item.get("evidence", "")},
+                        confidence=f_item.get("confidence", "medium"),
+                        dimension=f_item.get("dimension", ""),
+                        chart_id=chart_id,
+                    )
+                    events.append(sse("finding", state.finding_to_dict(rec)))
+                session.pending_findings.clear()
+
                 return events
 
             for chunk in chat_obj.stream(body.content):
@@ -275,8 +373,15 @@ async def post_message(
             for ev in drain_pending():
                 yield ev
 
-            full_text = "".join(buffer)
+            raw_text = "".join(buffer)
+            full_text = _recover_misemitted_tool_calls(raw_text)
             state.finalize_assistant_message(assistant_id, full_text)
+            for ev in drain_pending():
+                yield ev
+            # If recovery rewrote the message, tell the client to replace the
+            # streamed buffer with the cleaned text.
+            if full_text != raw_text:
+                yield sse("final_content", {"content": full_text})
             yield sse("done", {"messageId": assistant_id})
 
             # Post-stream: title + suggestions (run in parallel via executor).

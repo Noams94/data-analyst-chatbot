@@ -14,7 +14,8 @@
  */
 
 import { useCallback, useReducer, useRef } from "react";
-import { useApi, type ChartPart, type DashboardChartPart, type MessageDTO, type PlotlyChartPart, type SnippetPart } from "./api";
+import { toast } from "sonner";
+import { useApi, type Api, type ChartPart, type DashboardChartPart, type FindingPart, type MessageDTO, type PlotlyChartPart, type SnippetPart } from "./api";
 
 export type StreamingMessage = {
   id: string;          // local placeholder until `done` brings the server id
@@ -32,6 +33,7 @@ type State = {
   messages: MessageDTO[];                  // fully persisted turns from the server
   streaming: StreamingMessage | null;      // the in-flight assistant message
   suggestions: string[];                   // follow-up question chips
+  findings: FindingPart[];                 // workspace findings (live-streamed)
 };
 
 type Action =
@@ -39,6 +41,7 @@ type Action =
   | { type: "user_sent"; content: string; tempId: string }
   | { type: "stream_start"; tempId: string }
   | { type: "token"; text: string }
+  | { type: "final_content"; text: string }
   | { type: "tool_start"; name: string }
   | { type: "tool_end" }
   | { type: "chart"; chart: ChartPart }
@@ -47,8 +50,13 @@ type Action =
   | { type: "error"; message: string }
   | { type: "done"; messageId: string }
   | { type: "set_pinned"; messageId: string; pinned: boolean }
+  | { type: "delete_message"; messageId: string }
   | { type: "suggestions"; items: string[] }
-  | { type: "dashboard_chart"; chart: DashboardChartPart };
+  | { type: "dashboard_chart"; chart: DashboardChartPart }
+  | { type: "finding"; finding: FindingPart }
+  | { type: "set_findings"; findings: FindingPart[] }
+  | { type: "patch_finding"; finding: FindingPart }
+  | { type: "remove_finding"; findingId: string };
 
 function blankStreaming(tempId: string): StreamingMessage {
   return {
@@ -67,7 +75,9 @@ function blankStreaming(tempId: string): StreamingMessage {
 function reducer(state: State, action: Action): State {
   switch (action.type) {
     case "reset":
-      return { messages: action.messages, streaming: null, suggestions: [] };
+      // Full reload (e.g. switching chats) — findings are refetched per chat,
+      // so clear them rather than flashing the previous chat's list.
+      return { messages: action.messages, streaming: null, suggestions: [], findings: [] };
     case "user_sent":
       return {
         messages: [
@@ -86,12 +96,16 @@ function reducer(state: State, action: Action): State {
         ],
         streaming: null,
         suggestions: [],
+        findings: state.findings,
       };
     case "stream_start":
       return { ...state, streaming: blankStreaming(action.tempId) };
     case "token":
       if (!state.streaming) return state;
       return { ...state, streaming: { ...state.streaming, content: state.streaming.content + action.text } };
+    case "final_content":
+      if (!state.streaming) return state;
+      return { ...state, streaming: { ...state.streaming, content: action.text } };
     case "tool_start":
       if (!state.streaming) return state;
       return { ...state, streaming: { ...state.streaming, toolActive: action.name } };
@@ -124,13 +138,18 @@ function reducer(state: State, action: Action): State {
         plotlyCharts: state.streaming.plotlyCharts,
         createdAt: new Date().toISOString(),
       };
-      return { messages: [...state.messages, finalized], streaming: null, suggestions: state.suggestions };
+      return { messages: [...state.messages, finalized], streaming: null, suggestions: state.suggestions, findings: state.findings };
     case "set_pinned":
       return {
         ...state,
         messages: state.messages.map((m) =>
           m.id === action.messageId ? { ...m, pinned: action.pinned } : m,
         ),
+      };
+    case "delete_message":
+      return {
+        ...state,
+        messages: state.messages.filter((m) => m.id !== action.messageId),
       };
     case "suggestions":
       return { ...state, suggestions: action.items };
@@ -139,6 +158,17 @@ function reducer(state: State, action: Action): State {
         new CustomEvent("dashboard-chart-added", { detail: action.chart }),
       );
       return state;
+    case "finding":
+      return { ...state, findings: [...state.findings, action.finding] };
+    case "set_findings":
+      return { ...state, findings: action.findings };
+    case "patch_finding":
+      return {
+        ...state,
+        findings: state.findings.map((f) => (f.id === action.finding.id ? action.finding : f)),
+      };
+    case "remove_finding":
+      return { ...state, findings: state.findings.filter((f) => f.id !== action.findingId) };
   }
 }
 
@@ -164,7 +194,7 @@ function parseSseChunk(buffer: string): { events: { event: string; data: string 
 
 export function useChatStream(initialMessages: MessageDTO[] = []) {
   const api = useApi();
-  const [state, dispatch] = useReducer(reducer, { messages: initialMessages, streaming: null, suggestions: [] });
+  const [state, dispatch] = useReducer(reducer, { messages: initialMessages, streaming: null, suggestions: [], findings: [] });
   const abortRef = useRef<AbortController | null>(null);
 
   const reset = useCallback((messages: MessageDTO[]) => {
@@ -223,6 +253,9 @@ export function useChatStream(initialMessages: MessageDTO[] = []) {
             case "token":
               dispatch({ type: "token", text: String(data.text ?? "") });
               break;
+            case "final_content":
+              dispatch({ type: "final_content", text: String(data.content ?? "") });
+              break;
             case "tool_start":
               dispatch({ type: "tool_start", name: String(data.name ?? "") });
               break;
@@ -259,6 +292,9 @@ export function useChatStream(initialMessages: MessageDTO[] = []) {
             case "dashboard_chart":
               dispatch({ type: "dashboard_chart", chart: data as unknown as DashboardChartPart });
               break;
+            case "finding":
+              dispatch({ type: "finding", finding: data as unknown as FindingPart });
+              break;
           }
         }
       }
@@ -283,5 +319,57 @@ export function useChatStream(initialMessages: MessageDTO[] = []) {
     }
   }, [api]);
 
-  return { state, send, reset, stop, setPinned };
+  const deleteMessage = useCallback(async (messageId: string) => {
+    // Server-first: deleting is rare enough that the round-trip latency is
+    // fine, and it spares us reconstructing the message on failure.
+    try {
+      await api.deleteMessage(messageId);
+      dispatch({ type: "delete_message", messageId });
+    } catch (e) {
+      toast.error((e as Error).message || "Failed to delete message");
+    }
+  }, [api]);
+
+  const setFindings = useCallback((findings: FindingPart[]) => {
+    dispatch({ type: "set_findings", findings });
+  }, []);
+
+  const patchFinding = useCallback(
+    async (
+      findingId: string,
+      updates: Parameters<Api["patchFinding"]>[1],
+    ) => {
+      try {
+        const updated = await api.patchFinding(findingId, updates);
+        dispatch({ type: "patch_finding", finding: updated });
+      } catch {
+        // ignore — caller can retry
+      }
+    },
+    [api],
+  );
+
+  const removeFinding = useCallback(
+    async (findingId: string) => {
+      dispatch({ type: "remove_finding", findingId });
+      try {
+        await api.deleteFinding(findingId);
+      } catch {
+        // swallow
+      }
+    },
+    [api],
+  );
+
+  return {
+    state,
+    send,
+    reset,
+    stop,
+    setPinned,
+    deleteMessage,
+    setFindings,
+    patchFinding,
+    removeFinding,
+  };
 }

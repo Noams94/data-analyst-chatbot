@@ -24,6 +24,8 @@ class ChatSession:
     pending_code_snippets: list[dict] = field(default_factory=list)
     pending_plotly_charts: list[dict] = field(default_factory=list)  # {"spec": str, "title": str}
     pending_dashboard_charts: list[dict] = field(default_factory=list)  # {"spec": str, "title": str, "position": int}
+    pending_findings: list[dict] = field(default_factory=list)  # {"title", "claim", "evidence", "confidence", "dimension", "chart_ref": "last"|None}
+    last_plotly_chart_index: int = -1  # tracks how many plotly charts have been emitted (for chart_ref="last")
 
 
 _session: ContextVar[Optional[ChatSession]] = ContextVar("session", default=None)

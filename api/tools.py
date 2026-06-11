@@ -576,6 +576,51 @@ def add_to_dashboard(
     return f"✅ '{chart_title}' added to dashboard (slot {slot + 1})."
 
 
+def record_finding(
+    title: str,
+    claim: str,
+    evidence: str = "",
+    confidence: str = "medium",
+    dimension: str = "",
+    attach_last_chart: bool = True,
+) -> str:
+    """
+    Record a structured finding from the analysis. Use this whenever you derive
+    an insight, statistical result, anomaly, segment, or recommendation that
+    the user should be able to review later in the Findings panel and curate
+    into a dashboard or report.
+
+    Call this proactively — at minimum once per question — even when the user
+    didn't explicitly ask for a "finding". A good finding has:
+
+      - title: 3–8 word noun phrase, e.g. "Revenue concentrates in 3 SKUs"
+      - claim: ONE sentence stating what the data shows, with the key number
+        embedded (e.g. "Top 3 SKUs account for 64% of Q3 revenue (n=12,400).")
+      - evidence: 1–3 sentences with the supporting numbers (sample size,
+        effect size, p-value, CI). Plain text is fine.
+      - confidence: "low" (small sample / weak effect), "medium" (default),
+        or "high" (large sample, robust effect, low p-value).
+      - dimension: the business area, e.g. "revenue", "retention", "quality",
+        "geo", "segment". Used to group findings.
+      - attach_last_chart: True (default) links the most-recent interactive
+        chart to this finding so it shows in the Findings card.
+
+    Findings are persisted, not just narrated. The user sees them as cards
+    they can drag into the Dashboard or Report Draft.
+    """
+    s = current()
+    chart_ref = "last" if attach_last_chart else None
+    s.pending_findings.append({
+        "title": (title or "").strip()[:512],
+        "claim": (claim or "").strip(),
+        "evidence": (evidence or "").strip(),
+        "confidence": confidence if confidence in ("low", "medium", "high") else "medium",
+        "dimension": (dimension or "").strip()[:64],
+        "chart_ref": chart_ref,
+    })
+    return f"✅ Finding recorded: {title}"
+
+
 def clear_dashboard_tool() -> str:
     """
     Remove all charts from this chat's dashboard.
