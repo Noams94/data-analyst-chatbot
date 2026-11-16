@@ -29,6 +29,8 @@ export function PromptInput({
   const onKeyDown = (e: KeyboardEvent<HTMLTextAreaElement>) => {
     if (e.key === "Enter" && !e.shiftKey) {
       e.preventDefault();
+      // Enter also confirms IME composition (e.g. Japanese, Chinese, Korean): don't send mid-composition.
+      if (e.nativeEvent.isComposing || e.keyCode === 229) return;
       submit();
     }
   };
