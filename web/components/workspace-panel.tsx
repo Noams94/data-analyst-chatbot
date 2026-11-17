@@ -372,6 +372,8 @@ function DashboardChartCell({
               onChange={(e) => setTitleDraft(e.target.value)}
               onKeyDown={(e) => {
                 if (e.key === "Enter") {
+                  // Skip the Enter that confirms IME composition.
+                  if (e.nativeEvent.isComposing || e.keyCode === 229) return;
                   onPatch(chart.id, { title: titleDraft });
                   setEditing(false);
                 }
